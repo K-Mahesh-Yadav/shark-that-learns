@@ -14,21 +14,24 @@ No dependencies. numpy is used if present, and only for the .npz export.
 
     from pelagic_brain import Brain
     b = Brain.load("brain.json")
-    turn = b.step({"how close": 0.8, "fish ahead": 0.6, "fish beside": -0.3})
+    turn, climb = b.step({"how close": 0.8, "fish ahead": 0.6, "fish right": -0.3})
 
-The network is 14 -> 10 -> 1 with tanh units. Ten of the weights are a
-per-unit leak: each hidden unit can carry a fraction of its own previous
-state, which is the brain's only memory. The leak is clamped to [0, 0.9]
-exactly as the simulation clamps it — a negative value would just make the
-unit oscillate against itself every tick, and a value past 1.0 latches it.
+The 3D shark is 19 -> 12 -> 2 with tanh units: two outputs, turn and climb.
+Brains saved from the earlier flat version are 14 -> 10 -> 1 and load too.
+One weight per hidden unit is a leak: each unit can carry a fraction of its
+own previous state, which is the brain's only memory. The leak is clamped to
+[0, 0.9] exactly as the simulation clamps it — a negative value would just
+make the unit oscillate against itself every tick, and a value past 1.0
+latches it.
 
 Weight layout inside the flat `weights` array:
 
     w_in    hidden * inputs values, hidden-major
             unit j reads weights[j*inputs : (j+1)*inputs]
     w_rec   hidden values, one leak per unit
-    w_out   hidden values
-    b_out   1 value
+    w_out   outputs * hidden values, output-major
+            output k reads the k-th block of `hidden` values
+    b_out   outputs values
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ import math
 import sys
 from typing import Dict, Iterable, List, Optional, Sequence
 
-FORMAT = "pelagic-brain"
+FORMATS = ("shark-brain", "pelagic-brain")   # 3D, and the earlier flat version
 
 
 class BrainError(Exception):
@@ -49,12 +52,14 @@ class Brain:
     """A trained shark brain, restored from a saved JSON file."""
 
     def __init__(self, data: dict):
-        if not isinstance(data, dict) or data.get("format") != FORMAT:
+        if not isinstance(data, dict) or data.get("format") not in FORMATS:
             raise BrainError("not a saved brain file")
 
         net = data.get("network") or {}
         self.n_in: int = int(net.get("inputs", 0))
         self.n_hid: int = int(net.get("hidden", 0))
+        self.n_out: int = int(net.get("outputs", 1))
+        self.outputs: List[str] = list(net.get("outputNames") or ["turn"])
         self.senses: List[str] = list(net.get("senses") or [])
         self.memory_on: bool = bool(net.get("memoryOn", True))
 
@@ -68,14 +73,16 @@ class Brain:
         w = data.get("weights")
         if not isinstance(w, list):
             raise BrainError("no weights in file")
-        expected = self.n_in * self.n_hid + self.n_hid * 2 + 1
+        expected = self.n_in * self.n_hid + self.n_hid + self.n_hid * self.n_out + self.n_out
         if len(w) != expected:
             raise BrainError(
-                f"expected {expected} weights for a {self.n_in}-{self.n_hid}-1 "
+                f"expected {expected} weights for a {self.n_in}-{self.n_hid}-{self.n_out} "
                 f"network, found {len(w)}"
             )
         if len(self.senses) != self.n_in:
             raise BrainError("sense labels do not match the input count")
+        if len(self.outputs) != self.n_out:
+            raise BrainError("output labels do not match the output count")
 
         cut_rec = self.n_in * self.n_hid
         cut_out = cut_rec + self.n_hid
@@ -84,8 +91,12 @@ class Brain:
             for j in range(self.n_hid)
         ]
         self.w_rec: List[float] = [float(x) for x in w[cut_rec:cut_out]]
-        self.w_out: List[float] = [float(x) for x in w[cut_out:cut_out + self.n_hid]]
-        self.b_out: float = float(w[cut_out + self.n_hid])
+        self.w_out: List[List[float]] = [
+            [float(x) for x in w[cut_out + k * self.n_hid:cut_out + (k + 1) * self.n_hid]]
+            for k in range(self.n_out)
+        ]
+        cut_b = cut_out + self.n_hid * self.n_out
+        self.b_out: List[float] = [float(x) for x in w[cut_b:cut_b + self.n_out]]
 
         self.world: dict = data.get("world") or {}
         self.training: dict = data.get("training") or {}
@@ -136,12 +147,12 @@ class Brain:
             raise BrainError(f"expected {self.n_in} sense values, got {len(x)}")
         return x
 
-    def step(self, senses) -> float:
-        """One tick. Returns the turn command, in [-1, 1].
+    def step(self, senses) -> List[float]:
+        """One tick. Returns one command per output, each in [-1, 1].
 
-        Positive turns one way and negative the other; the simulation
-        multiplies this by its turn rate. Call reset() between runs, or the
-        memory units carry state across what should be separate hunts.
+        For the 3D shark that is [turn, climb]; the simulation multiplies
+        each by its turn rate. Call reset() between runs, or the memory units
+        carry state across what should be separate hunts.
         """
         x = self.vector(senses)
         prev = self.hidden
@@ -154,25 +165,26 @@ class Brain:
                     s += row[i] * x[i]
             s += self.leak(j) * prev[j]
             nxt[j] = math.tanh(s)
-        out = self.b_out
-        for j in range(self.n_hid):
-            out += self.w_out[j] * nxt[j]
         self.hidden = nxt
-        return math.tanh(out)
+        return [
+            math.tanh(self.b_out[k] + sum(self.w_out[k][j] * nxt[j] for j in range(self.n_hid)))
+            for k in range(self.n_out)
+        ]
 
     # --------------------------------------------------------- inspection
 
     def influence(self) -> List[tuple]:
-        """How much each sense actually reaches the output.
+        """How much each sense actually reaches the outputs.
 
-        For sense i this sums |w_in[j][i]| * |w_out[j]| over the hidden
+        For sense i this sums |w_in[j][i]| * |w_out[k][j]| over the hidden
         units, which weights a connection by how much its unit matters
         downstream. Crude, but it ranks senses far better than raw |w_in|.
         """
         scores = []
         for i, name in enumerate(self.senses):
             total = sum(
-                abs(self.w_in[j][i]) * abs(self.w_out[j]) for j in range(self.n_hid)
+                abs(self.w_in[j][i]) * abs(self.w_out[k][j])
+                for j in range(self.n_hid) for k in range(self.n_out)
             )
             scores.append((name, total, bool(self.active[i])))
         return sorted(scores, key=lambda r: -r[1])
@@ -204,7 +216,8 @@ class Brain:
         t, w = self.training, self.world
         L: List[str] = []
         add = L.append
-        add(f"Shark brain — {self.n_in}\u2013{self.n_hid}\u20131, tanh")
+        add(f"Shark brain — {self.n_in}\u2013{self.n_hid}\u2013{self.n_out}, tanh"
+            f" ({', '.join(self.outputs)})")
         add(f"  generation {t.get('generation', '?')}, "
             f"stage {t.get('stage', '?')} of {t.get('stagesTotal', '?')}"
             f"   best single hunt: {t.get('bestSingleHunt', '?')} fish")
@@ -221,7 +234,7 @@ class Brain:
                 f"vs memory blocked {t.get('memoryBlocked')}")
 
         add("")
-        add("What reaches the output, strongest first")
+        add("What reaches the outputs, strongest first")
         ranked = self.influence()
         top = max((r[1] for r in ranked), default=1.0) or 1.0
         for name, score, on in ranked:
@@ -239,7 +252,7 @@ class Brain:
             any_mem = True
             # a leak r averages roughly 1/(1-r) ticks of history
             add(f"  unit {j}: leak {r:.3f}  \u2248 {1.0 / (1.0 - r):5.1f} ticks of history"
-                f"   (weight to output {self.w_out[j]:+.2f})")
+                "   (to " + ", ".join(f"{n} {self.w_out[k][j]:+.2f}" for k, n in enumerate(self.outputs)) + ")")
         if not any_mem:
             add("  none — every unit reacts to the present tick only")
 
@@ -271,7 +284,7 @@ class Brain:
             "w_in": np.array(self.w_in, dtype=np.float32),
             "w_rec": np.array(self.w_rec, dtype=np.float32),
             "w_out": np.array(self.w_out, dtype=np.float32),
-            "b_out": np.float32(self.b_out),
+            "b_out": np.array(self.b_out, dtype=np.float32),
             "active": np.array(self.active, dtype=np.int8),
         }
 
@@ -285,16 +298,23 @@ class Brain:
 
 def _demo(brain: Brain) -> str:
     """Drive the brain through a scripted encounter and show what it does."""
-    lines = ["Turn command through a scripted encounter",
+    lines = [" / ".join(brain.outputs).capitalize() + " through a scripted encounter",
              "(positive and negative are opposite directions)", ""]
+    # the flat version called the sideways senses "beside"
+    alias = {"fish right": "fish beside", "shoal right": "shoal beside",
+             "scent right": "scent beside"}
 
     def run(label, frames):
         brain.reset()
         row = []
         for senses in frames:
-            usable = {k: v for k, v in senses.items() if k in brain._index}
-            row.append(f"{brain.step(usable):+.3f}")
-        lines.append(f"  {label:<36} {'  '.join(row)}")
+            usable = {}
+            for k, v in senses.items():
+                k = k if k in brain._index else alias.get(k, k)
+                if k in brain._index:
+                    usable[k] = v
+            row.append("/".join(f"{o:+.2f}" for o in brain.step(usable)))
+        lines.append(f"  {label:<34} {'  '.join(row)}")
 
     # Crossing open water with nothing in view. The walls still register, and
     # their readings shift as it travels, so the turn command keeps moving.
@@ -309,20 +329,20 @@ def _demo(brain: Brain) -> str:
     # un-truncated, kept here because it is worth being able to see.
     run("blind, with the walls not felt", [{} for _ in range(6)])
     run("a fish appears off to one side", [
-        {"how close": 0.4, "fish ahead": 0.5, "fish beside": 0.8,
+        {"how close": 0.4, "fish ahead": 0.5, "fish right": 0.8,
          "wall astern": 0.4} for _ in range(6)
     ])
     run("closing on it, dead ahead", [
-        {"how close": 0.9, "fish ahead": 1.0, "fish beside": 0.05,
+        {"how close": 0.9, "fish ahead": 1.0, "fish right": 0.05,
          "closing": 0.7, "wall astern": 0.4} for _ in range(6)
     ])
     run("lost it, scent trails to one side", [
-        {"scent here": 0.5, "scent beside": 0.7, "scent ahead": 0.3,
+        {"scent here": 0.5, "scent right": 0.7, "scent ahead": 0.3,
          "wall ahead": 0.3, "wall astern": 0.5} for _ in range(6)
     ])
     lines.append("")
     lines.append("  Compare the first two rows. Identical numbers mean a fixed turn")
-    lines.append("  rate, which is a circle; a drifting number means it is quartering")
+    lines.append("  rate, which is a circle; drifting numbers mean it is quartering")
     lines.append("  the water. Everything after the first two rows holds its senses")
     lines.append("  fixed, so those rows settle as the memory units fill up.")
     return "\n".join(lines)

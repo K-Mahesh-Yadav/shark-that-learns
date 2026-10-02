@@ -18,12 +18,12 @@
     --faint:     #4a5459;
     --pos:       #c0924f;
     --neg:       #6c93a6;
-    --alarm:     #a85a44;
+    --alarm:     #c4674c;
     --fish:      #ded9cd;
-    --shark:     #2b373d;
-    --shark-edge:#556269;
-    --scent:     #4d7f93;
-    --scent-a:   0.42;
+    --shark:     #5d6d75;
+    --edge:      #33454d;
+    --scent:     #4d8fa8;
+    --scent-a:   0.5;
     box-sizing: border-box;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -34,8 +34,8 @@
       --bg:#e7e9e4; --water:#dfe2dd; --hair:#b9bfb8; --hair-soft:#cdd2ca;
       --ink:#131a1c; --soft:#5c666a; --faint:#8b9491;
       --pos:#7c5a28; --neg:#3c6274; --alarm:#9a4a33;
-      --fish:#1d2528; --shark:#2f3b40; --shark-edge:#0f1518;
-      --scent:#5d7f86; --scent-a:0.30;
+      --fish:#1d2528; --shark:#3b4a51; --edge:#a9b1aa;
+      --scent:#5d7f86; --scent-a:0.38;
       color-scheme: light;
     }
   }
@@ -43,8 +43,8 @@
     --bg:#e7e9e4; --water:#dfe2dd; --hair:#b9bfb8; --hair-soft:#cdd2ca;
     --ink:#131a1c; --soft:#5c666a; --faint:#8b9491;
     --pos:#7c5a28; --neg:#3c6274; --alarm:#9a4a33;
-    --fish:#1d2528; --shark:#2f3b40; --shark-edge:#0f1518;
-    --scent:#5d7f86; --scent-a:0.30;
+    --fish:#1d2528; --shark:#3b4a51; --edge:#a9b1aa;
+    --scent:#5d7f86; --scent-a:0.38;
     color-scheme: light;
   }
   *{box-sizing:inherit}
@@ -58,13 +58,22 @@
   }
   .frame{height:100%; display:grid; grid-template-columns: minmax(0,1fr) 380px;}
 
-  .stage{position:relative; min-width:0;}
-  #water{position:absolute; inset:0; display:block; width:100%; height:100%;}
+  .stage{position:relative; min-width:0; overflow:hidden; background:var(--water);}
+  #view{position:absolute; inset:0; touch-action:none; cursor:grab;}
+  #view:active{cursor:grabbing}
+  #view canvas{display:block; width:100%; height:100%;}
+  .camera{position:absolute; top:22px; left:24px; z-index:2; display:flex; flex-direction:column; gap:8px; align-items:flex-start;}
+  .seg{display:flex; background:color-mix(in srgb, var(--bg) 70%, transparent); border:1px solid var(--hair); border-radius:2px;}
+  .seg button{border:none; padding:6px 12px; font-size:12px; color:var(--soft);}
+  .seg button + button{border-left:1px solid var(--hair);}
+  .seg button[aria-pressed="true"]{color:var(--ink); box-shadow:inset 0 -2px 0 var(--pos);}
+  .hint{margin:0; font-size:11.5px; color:var(--soft); pointer-events:none;}
   .readout{
     position:absolute; left:30px; bottom:24px; z-index:2; pointer-events:none;
     display:flex; gap:26px; color:var(--soft); font-size:12px;
   }
   .readout b{display:block; color:var(--ink); font-size:20px; font-weight:400; line-height:1.15;}
+  .nogl{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; color:var(--soft); text-align:center;}
 
   .panel{border-left:1px solid var(--hair); overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column;}
   .block{padding:22px 24px; border-bottom:1px solid var(--hair-soft);}
@@ -97,11 +106,12 @@
   button{
     font:inherit; font-size:12.5px; color:var(--ink); background:transparent;
     border:1px solid var(--hair); padding:7px 12px; border-radius:1px; cursor:pointer;
-    transition:border-color .12s ease;
+    transition:border-color .12s ease, color .12s ease;
   }
   button:hover{border-color:var(--soft)}
   button[aria-pressed="true"]{border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--hair);}
   button:focus-visible{outline:2px solid var(--pos); outline-offset:2px}
+  button.primary{border-color:var(--pos);}
   .io{display:none; margin-top:12px}
   .io.on{display:block}
   .io textarea{
@@ -120,6 +130,8 @@
     .frame{grid-template-columns:1fr; height:auto;}
     .stage{aspect-ratio:1/1;}
     .panel{border-left:none; border-top:1px solid var(--hair);}
+    .camera{top:14px; left:14px}
+    .hint{display:none}
     .readout{left:18px; bottom:16px; gap:18px}
   }
   @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
@@ -128,7 +140,15 @@
 <body>
 <div class="frame">
   <section class="stage">
-    <canvas id="water" role="img" aria-label="A school of fish, their scent plume, and a hunting shark, drawn live"></canvas>
+    <div id="view" role="img" aria-label="A school of fish, their scent, and a hunting shark in a three-dimensional tank, drawn live"></div>
+    <div class="camera">
+      <div class="seg" role="group" aria-label="Camera">
+        <button data-cam="orbit" aria-pressed="true">Orbit</button>
+        <button data-cam="follow" aria-pressed="false">Follow the shark</button>
+        <button data-cam="ride" aria-pressed="false">Ride along</button>
+      </div>
+      <p class="hint" id="cam-hint">Drag to turn the tank · scroll to zoom · right-drag to pan</p>
+    </div>
     <div class="readout">
       <div><b id="r-gen">—</b>generation</div>
       <div><b id="r-caught">0</b>caught so far</div>
@@ -139,20 +159,20 @@
   <aside class="panel">
     <div class="block">
       <h2>The shark's brain</h2>
-      <p class="note">Fourteen senses, ten hidden units, one decision: how hard to turn. Filled circles are firing now; line weight is the strength of a connection. At stage 8 the hidden units start feeding back into themselves, and the brain gains a memory of the tick before.</p>
+      <p class="note">Nineteen senses, twelve hidden units, two decisions: how hard to turn, and how hard to climb or dive. Filled circles are firing now; line weight is the strength of a connection. At stage 8 the hidden units start feeding back into themselves, and the brain gains a memory of the tick before.</p>
       <canvas id="brain" role="img" aria-label="The shark's neural network, with live activity"></canvas>
       <div class="legend">
-        <span><i class="swatch" style="background:var(--pos)"></i>turn this way</span>
-        <span><i class="swatch" style="background:var(--neg)"></i>turn the other</span>
+        <span><i class="swatch" style="background:var(--pos)"></i>positive</span>
+        <span><i class="swatch" style="background:var(--neg)"></i>negative</span>
         <span><i class="swatch" style="background:var(--hair)"></i>not yet given</span>
       </div>
       <p class="after" id="brain-hint"></p>
-      <p class="after">Sight reaches 160 units and stops, in a 150° cone; nothing is seen to the sides or behind. The four wall senses carry at any distance, on purpose: without them a shark with nothing in view reads a constant, and a constant turn is a circle. The last three senses are the nose: how strong the scent is here, whether there is more of it to one side, and whether it is building up ahead.</p>
+      <p class="after">Directions are the shark's own: "right" is where a positive turn takes it, "above" is where a positive climb takes it. Sight reaches 160 units and stops, in a 150° cone. The six wall senses carry at any distance, so a shark with nothing in view never reads a constant. The last four senses are the nose: how strong the scent is here, whether there is more of it to the right or above, and whether it is building up ahead.</p>
     </div>
 
     <div class="block">
       <h2>What each faculty is worth</h2>
-      <p class="note">Each generation's champion hunts the same water up to three times: intact, with the three scent inputs forced to zero, and with its memory held at zero. Same brain, same fish, same start. The school is adapting too, so expect these to wander.</p>
+      <p class="note">Each generation's champion hunts the same water up to three times: intact, with the four scent inputs forced to zero, and with its memory held at zero. Same brain, same fish, same start. The school is adapting too, so expect these to wander.</p>
       <div class="verdict" id="v-delta">—<small id="v-sub">waiting for stage 7</small></div>
       <dl class="rows" style="margin-top:14px">
         <div class="row"><dt>Nose working</dt><dd id="s-with">—</dd></div>
@@ -165,7 +185,7 @@
     <div class="block">
       <h2>The school</h2>
       <p class="note">Every fish carries seven inherited numbers. When one is eaten, its place is taken by a mutated copy of a survivor, so the school is under selection the whole time the shark is hunting it. Tick marks are where each trait started.</p>
-      <canvas id="traits" role="img" aria-label="Six inherited traits of the school, and how far each has drifted"></canvas>
+      <canvas id="traits" role="img" aria-label="Seven inherited traits of the school, and how far each has drifted"></canvas>
       <dl class="rows" style="margin:14px 0 0">
         <div class="row"><dt>Lost to the shark</dt><dd id="s-eaten">—</dd></div>
         <div class="row"><dt>The school's feeding rate</dt><dd id="s-starved">—</dd></div>
@@ -191,7 +211,7 @@
     <div class="block">
       <h2>Controls</h2>
       <div class="controls">
-        <button id="b-demo">Watch a trained shark</button>
+        <button id="b-demo" class="primary">Watch a trained shark</button>
         <button id="b-pause" aria-pressed="false">Pause the water</button>
         <button id="b-fast" aria-pressed="false">Run at ×3</button>
         <button id="b-scent" aria-pressed="false">Show the scent</button>
@@ -221,21 +241,22 @@
     </div>
 
     <div class="block colophon">
-      <p>The school is Reynolds' boids: separate, align, follow the centre, and flee a predator. Those weights are no longer fixed — each fish inherits its own, so the school drifts as the shark improves and the shark's catch falls as the school does. Neither side settles.</p>
-      <p>The seventh number is the one to watch: how far off a straight line away from the shark a fish breaks. Nothing charges for it. Turning sideways simply keeps you nearer the thing chasing you, and turning too far points you back into it, so the price is paid in geometry rather than in energy. Which side a fish breaks to is a coin flip at birth and is not inherited, which is why a school fans apart instead of wheeling as one.</p>
-      <p>Every fish leaves scent in the water each tick. The field diffuses and decays with a half-life of about five seconds, so the plume behind a school is a record of where it has just been. The shark reads it the way a real one does — by comparing its two nostrils, not by being told a direction.</p>
-      <p>The brain is a 14–10–1 network with tanh units and 161 weights, ten of which give each hidden unit a leaky connection to its own state one tick earlier — a time constant, so it can average a signal over time instead of only reacting to this instant. Until stage 8 those are held at zero and it is strictly feed-forward, reacting only to this instant. No gradients and no library: weights are mutated and selected on how many fish each shark catches. Senses are handed over one stage at a time, because a brain given everything at once tends to learn nothing.</p>
+      <p>The school is Reynolds' boids in three dimensions: separate, align, follow the centre, and flee a predator. Those weights are no longer fixed — each fish inherits its own, so the school drifts as the shark improves and the shark's catch falls as the school does. Neither side settles.</p>
+      <p>The seventh number is the one to watch: how far off a straight line away from the shark a fish breaks. Nothing charges for it. Breaking sideways keeps you nearer the thing chasing you, and breaking too far points you back into it, so the price is paid in geometry rather than in energy. Which way round a fish breaks is set at birth and not inherited, which is why a school bursts apart instead of wheeling as one.</p>
+      <p>Every fish leaves scent in the water each tick. The field diffuses in all three directions and decays, so the cloud behind a school is a record of where it has just been. The shark reads it by comparing four nostrils, not by being told a direction.</p>
+      <p>The brain is a 19–12–2 network with tanh units and 266 weights, twelve of which give each hidden unit a leaky connection to its own state one tick earlier — a time constant, so it can average a signal over time instead of only reacting to this instant. Until stage 8 those are held at zero. No gradients and no machine-learning library: weights are mutated and selected on how many fish each shark catches. Senses are handed over one stage at a time, because a brain given everything at once tends to learn nothing.</p>
       <p>Because both sides move, a generation's catch is not comparable with one fifty generations earlier: a later shark may be better and still eat less. The trait chart is the other half of that story.</p>
-      <p>Pausing the water gives the whole frame budget to training.</p>
+      <p>Pausing the water gives the whole frame budget to training; the camera still moves. The 3D drawing uses three.js; everything that learns is the plain JavaScript in this file.</p>
     </div>
   </aside>
 </div>
 
-<script type="application/json" id="demo-brain">{"format":"pelagic-brain","version":1,"saved":"2026-09-22T21:57:08.221Z","network":{"inputs":14,"hidden":10,"outputs":1,"activation":"tanh","recurrence":"one leak per hidden unit, clamped to [0, 0.9]; h(t) = tanh(Wx + leak*h(t-1))","senses":["bias","how close","fish ahead","fish beside","closing","wall ahead","wall astern","wall left","wall right","shoal ahead","shoal beside","scent here","scent beside","scent ahead"],"active":[1,1,1,1,1,1,1,1,1,1,1,1,1,1],"memoryOn":true,"output":"turn, in [-1, 1]","layout":["w_in: 140 values, hidden-major (unit j occupies [j*14 .. j*14+13])","w_rec: 10 values, one per hidden unit","w_out: 10 values","b_out: 1 value"]},"world":{"arena":[1400,900],"vision":160,"fieldOfViewDegrees":150,"sharkSpeed":3.35,"turnRate":0.062,"catchRadius":11,"scent":{"cell":25,"decayPerUpdate":0.978,"updateEveryTicks":3,"floor":0.8,"scale":14}},"training":{"generation":150,"stage":8,"stagesTotal":8,"bestSingleHunt":27,"noseTrials":115,"noseWorking":6.26087,"nostrilsBlocked":5.58261,"memoryTrials":109,"memoryWorking":6.2844,"memoryBlocked":5.69725},"weights":[-0.63359,0.1163,-0.58553,-0.53677,-0.50078,0.74562,-1.75213,-0.72774,0.27179,0.49255,-0.9052,-0.11324,-1.42896,0.4987,-1.55131,-0.8594,0.47217,-0.14633,1.17998,0.49264,0.72194,0.28901,-0.7159,-0.02591,1.35562,0.85329,0.19818,-0.09265,-0.659,-1.34615,-1.76202,-1.94144,-0.93095,1.75774,1.07446,0.76122,0.66815,1.30002,0.92718,-0.11616,-1.76259,-1.38309,1.1092,2.14891,-1.07702,-1.26552,1.76582,0.98426,-0.42282,0.65258,0.57092,0.25909,0.29438,-0.42045,1.31031,0.21687,-1.09421,0.11545,1.60173,1.93125,0.52242,0.05531,-0.80642,-0.25871,-0.21365,-0.21778,0.25862,-0.06226,0.13535,-1.03935,-0.92829,0.44269,-0.22127,0.38115,-0.70264,-1.54012,-0.67196,1.09201,-1.27101,-0.19019,1.42228,0.73621,-0.23312,-1.227,-0.80781,-2.87924,0.44083,-1.50332,1.5392,1.16775,-0.40358,-0.77986,-0.74071,1.04049,-0.8586,1.01139,0.02117,-1.1419,-0.64775,-0.17523,-0.01692,0.0701,-0.48021,0.65935,-1.26943,-0.16614,0.74423,-0.82772,-0.09633,0.22397,-0.2617,-0.67218,0.25723,-0.69557,-1.25649,1.07885,1.59013,0.32937,1.91193,0.97747,-1.64198,1.11697,0.01428,-0.9157,0.11801,-0.69502,-0.57003,-0.495,-0.65232,0.25814,1.07647,-1.07454,-0.64424,1.51691,-1.1014,-3.22535,-0.65811,1.01496,0.8622,-0.25237,0.30363,1.24332,0.86569,-0.39696,1.48338,-2.14383,-0.78839,-0.08086,0.21387,-0.16745,-0.26521,0.78899,0.73519,1.71614,2.60985,1.00435,-0.49435,-0.37656,0.23831,-0.4181,0.12975],"prey":{"traits":[{"name":"how far each fish looks","min":26,"max":72},{"name":"keep your distance","min":0.5,"max":2.1},{"name":"match your neighbours","min":0.1,"max":1.3},{"name":"stay with the group","min":0.1,"max":1.3},{"name":"how hard to bolt","min":0,"max":6},{"name":"how soon to bolt","min":50,"max":230},{"name":"which way to bolt","min":0,"max":120}],"note":"each pool entry is one fish genome, values in [0,1], decoded linearly into the ranges above","pool":[[0.0984,0.14181,0.20847,0.31852,0.65793,0.65504,0.07885],[0.72558,0.18473,0.12772,0.1329,1,0.60995,0.47578],[0.72558,0.18473,0.12772,0,1,0.60995,0.39255],[0.94101,0.38655,0.91754,0.41018,0.07807,0.76139,0.18305],[0,0.00245,0.51332,0,0.57529,0.59064,0.05169],[0.35738,0,0.40379,0.0358,0.7118,0.67911,0],[0.40268,0.40897,0.06016,0.77119,0.90602,0.99194,0.61951],[0.8338,0.35441,0.72579,0.18147,0.86493,0.87297,0.30839],[0,0.30312,0.25224,0.51724,0.61046,0.41411,0.18069],[0.5092,0.10622,0.99842,0.10126,0.53648,0.67474,0.46473],[0.12783,0,0.25012,0.19801,0.70307,0.65843,0.03782],[0.59552,0.2182,0.00679,0.07562,1,0.4891,0.49236],[0.38381,0.1116,0.39743,0.10404,0.649,0.67911,0],[0.57685,0.58255,0.25546,0,0.80886,0.62903,0.1028],[0.04756,0.23161,0.16095,0.21131,0.34277,0.52608,0],[0,0.30551,0.25771,0.26441,0.77596,0.42065,0.0887],[0.80989,0.33563,0.99166,0.1976,0.02224,0.3811,0.34556],[0,0.00245,0.51332,0,0.52811,0.59064,0.01063],[0,0.09243,0.21746,0.53786,0.7825,0.97558,0.68355],[0.94031,0.11137,0.72949,0.38913,0.79691,0.68282,0.38635],[0.23246,0.35237,0.15784,0.85585,0.69071,0.9817,0.62638],[0,0.01995,0.08226,0.13483,0.43249,0.87905,0.4195],[0.30497,0.14379,0.57711,0,0.95101,0.77586,0.21548],[0.72027,0.11535,0.54014,0,0.9508,0.63722,0.57995],[0.09706,0.1565,0.04674,0.54874,0.88404,0.99679,0.5996],[0.77311,0,0.72801,0.06567,0.61335,0.81254,0.44301],[0,0.30312,0.28712,0.51724,0.61046,0.41411,0.18069],[0.57587,0.1481,0.94347,0.11209,0.71705,0.71419,0.43727],[0.13451,0.01995,0.06884,0.13483,0.43249,0.87905,0.4195],[0.94031,0,0.75281,0.38913,0.79691,0.68282,0.38635],[0.29364,0.16863,0,0.02233,0.36544,1,0.02088],[0.5092,0.10622,0.99842,0.10126,0.52821,0.67474,0.46473],[0.2516,0.66813,0.58181,0.0077,0.40532,0.26949,0.33676],[0.69731,0.4295,0.64833,0,0.79825,0.64807,0.12375],[0.04478,0.14181,0.30396,0.35289,0.69177,0.69166,0],[0.06454,0.09243,0.06838,0.50774,0.7825,0.97558,0.68355],[0,0.41622,0.5593,0.68285,0.93888,0.67042,0.57369],[0,0.3067,0.38906,0.51231,0.17059,0.27844,0.10794],[0.75583,0.14195,0.71479,0.18681,0.57254,0.78832,0.51485],[0.28062,0.01085,0.24057,0.69424,0.68086,0.8765,0.68169],[0.62352,0.35027,0.59106,0,0.98201,0.54786,0.2353],[0.73213,0.26371,0.12772,0.13303,1,0.60995,0.26194],[0.78715,0.42445,0.30879,0.05806,0.93179,0.72383,0.10641],[0.72027,0.11535,0.54014,0,0.94818,0.63682,0.52799],[0.04478,0.14181,0.23318,0.35289,0.69177,0.69166,0.07885],[0.06239,0.01995,0.06884,0.13483,0.43249,0.87905,0.4195],[0.04478,0.14181,0.24478,0.35289,0.69177,0.70126,0.07885],[0.16305,0.2121,0.74511,0.33207,0.48156,0.68451,0],[0.65112,0.22448,0.64125,0,0.7578,0.659,0.99494],[0.72027,0.11535,0.54014,0,0.94818,0.63682,0.52799],[0.11727,0.25348,0.08734,0.67585,0.80555,1,0.65458],[0.94101,0.23193,0.91754,0.44672,0.08091,0.695,0.18305],[0.36674,0.4335,0.07823,0.9321,0.72289,0.86906,0.67483],[0.34358,0.0696,0.31793,0.03722,0.14381,1,0.43281],[0.06571,0.35927,0.51907,0.21615,0.20897,0.30032,0.10794],[1,0.10432,0.35529,0.16695,0.95719,0.39609,0.72145],[0.05397,0,0.56657,0.04636,0.49647,0.67169,0.03197],[0.71313,0.20283,0.97683,0,0.78263,0.73719,0.40281],[0.25027,0.4616,0.61764,0.66277,0.9108,0.90146,0.61359],[0.70157,0.01597,0.88987,0.04305,0.95531,0.49914,0.37593]]}}</script>
-<script>
+<script type="application/json" id="demo-brain">{"format":"shark-brain","version":2,"saved":"2026-10-02T09:56:05.342Z","network":{"inputs":19,"hidden":12,"outputs":2,"activation":"tanh","recurrence":"one leak per hidden unit, clamped to [0, 0.9]; h(t) = tanh(Wx + leak*h(t-1))","senses":["bias","how close","fish ahead","fish right","fish above","closing","wall ahead","wall astern","wall right","wall left","wall above","wall below","shoal ahead","shoal right","shoal above","scent here","scent right","scent above","scent ahead"],"outputNames":["turn","climb"],"active":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"memoryOn":true,"output":"turn and climb, each in [-1, 1]","layout":["w_in: 228 values, hidden-major (unit j occupies [j*19 .. j*19+18])","w_rec: 12 values, one per hidden unit","w_out: 24 values, output-major (output k occupies [k*12 .. k*12+11])","b_out: 2 values"]},"world":{"dimensions":3,"arena":[700,350,700],"vision":160,"fieldOfViewDegrees":150,"sharkSpeed":3.35,"turnRate":0.062,"pitchLimit":1,"catchRadius":13,"scent":{"cell":40,"decayPerUpdate":0.978,"updateEveryTicks":3,"floor":0.8,"scale":14}},"training":{"generation":250,"stage":8,"stagesTotal":8,"bestSingleHunt":17,"noseTrials":196,"noseWorking":3.17347,"nostrilsBlocked":2.54082,"memoryTrials":184,"memoryWorking":3.22826,"memoryBlocked":3.22826},"weights":[-0.40829,0.24056,0.32605,-1.37147,0.81817,-0.12319,-0.04268,-0.05975,1.08288,-0.7779,0.1632,-1.30464,0.29205,-0.54341,0.46847,0.48161,-0.54308,0.20138,0.23988,0.15166,-0.66156,1.82295,1.08832,0.74647,-0.2694,-0.4297,1.22508,0.76924,-0.57017,2.02535,-0.99471,-0.78624,-0.44812,1.16179,-0.4292,-2.08852,-0.86972,1.04283,-0.61234,-0.77137,0.56912,-0.45882,0.54131,-1.37886,0.60839,3.29982,1.52657,1.91308,0.13923,1.92615,0.46503,-0.24193,-1.17781,-0.67996,0.51857,-1.62476,0.35976,0.6389,-0.43557,0.1213,-2.25355,-0.36558,-1.27638,1.85777,0.75406,-0.53387,1.09434,0.03395,1.06941,0.38844,-0.49863,-0.12557,-0.01867,-1.5822,-0.20899,0.89034,0.27541,-0.26491,-1.52444,0.37139,0.55531,0.04258,0.57427,-0.96051,0.83506,1.19797,0.11174,0.1039,0.62269,1.30047,0.82177,-0.03115,-0.97494,2.06646,-2.17925,-1.30839,-1.86966,0.12455,0.865,-2.5199,0.8419,1.38888,0.00267,0.70821,-0.28329,-0.45319,0.24172,-0.71668,0.36884,0.21895,-0.31917,-0.16129,-0.18485,-0.53906,-0.68426,-0.54104,0.9417,-0.75173,0.4955,0.47581,-0.73342,1.18094,-0.45993,-0.22102,-0.66656,0.42118,-1.13578,-1.23521,-0.53251,-0.0095,-1.87755,0.31141,-0.46556,-0.01208,-1.12153,-0.45111,-0.51371,0.46286,0.70225,-0.27482,-1.6285,0.12015,0.25575,-1.70097,1.28261,0.2695,-0.19443,-1.21986,0.47684,1.33748,-1.77864,-1.18957,0.93464,0.19825,-0.0746,-1.78469,1.39455,-1.29493,-0.86395,-0.91054,0.42846,-1.87886,-1.95286,1.34518,-0.37861,0.18296,0.74012,-1.11139,-0.51197,1.2429,-1.44156,-1.88764,1.04726,0.32558,2.55355,-0.12892,-0.75844,-0.18533,0.56054,-0.69809,-0.76254,-0.22524,0.54722,-1.02373,0.65883,-1.41836,0.86966,-0.22888,0.39376,0.68632,-0.93857,-0.15041,1.10617,2.85447,0.23266,-0.81484,-0.62865,-0.61935,0.69314,1.42814,0.66533,0.42505,-0.97748,0.36078,-0.5752,-1.14552,1.98646,0.84696,0.25796,-0.00025,0.58619,-0.98171,-2.9125,-2.1378,0.40127,0.50652,-0.48419,0.8125,-0.26397,1.45096,-0.46052,-0.27581,0.13596,-0.13499,-0.34859,0.18509,-0.2999,-0.12019,1.47467,0.54363,0.49067,0.05134,0.47148,0.60639,-0.29432,-0.7139,1.89923,-0.2418,-0.01751,-1.77357,-2.89988,0.55982,-1.5534,-0.91752,0.20645,-0.88483,0.19519,-0.02807,-2.81326,1.51356,1.65394,-2.64455,-0.03983,1.09865,-0.528,0.76466,0.22335,-0.5618,-0.16658,-0.68519,2.01402,0.16807,-0.3705,-2.47739,-0.0708,-0.76993],"prey":{"traits":[{"name":"how far each fish looks","min":26,"max":72},{"name":"keep your distance","min":0.5,"max":2.1},{"name":"match your neighbours","min":0.1,"max":1.3},{"name":"stay with the group","min":0.1,"max":1.3},{"name":"how hard to bolt","min":0,"max":6},{"name":"how soon to bolt","min":50,"max":230},{"name":"which way to bolt","min":0,"max":120}],"note":"each pool entry is one fish genome, values in [0,1], decoded linearly into the ranges above","pool":[[0.68937,0.12261,0.27557,0.13845,0.32484,0.83068,0.17979],[0.82656,0.17333,0.98955,0.28678,0.41854,0.56232,0.53193],[0.45168,0.44821,0.93162,0,0.11382,0.45612,0.33685],[0.6018,0.66257,0.13438,0,0.22185,0.82045,0.22171],[0.90191,0.58189,0.91305,0.08515,0.0022,0.25122,0.29068],[0.31659,0.68049,0.323,0.04751,0.41083,0.94254,0.26289],[0.61846,0.07017,0.74697,0,0.28611,0.83356,0.16208],[0.83337,0.1445,1,0.11834,0.68087,0.6988,0.02985],[0.4023,0.96376,0.1638,0.0487,0.31286,0.90702,0.01042],[0.74181,0.13419,1,0.58622,0.81729,0.57799,0.33645],[0.35072,0.2612,0.37833,0,0.8004,0.80588,0.04951],[0.97335,0,0.78177,0.24064,0.75167,0.30378,0.79765],[0.21175,0.96458,0.6011,0.26635,0.40894,0.30023,0.14051],[0.55003,0.12698,0.46974,0.23772,0.88691,0.47617,0.22979],[0.55859,0.65608,0.92567,0.02217,0.14297,0.39335,0.54217],[0.74295,0.04034,0.87262,0.38721,0.7537,0.52025,0.13876],[0.81702,0,0.72221,0.09212,0.30881,0.40295,0.50234],[0.29085,0.98502,0.073,0.07703,0.19421,0.76573,0.30596],[0.19518,0.81201,0.55159,0.44091,0.38914,0.51294,0.12376],[0.78622,0,0.1619,0.26527,0.72411,0.81898,0],[0.92078,0.14872,0.89194,0.78494,1,0.50223,0.26811],[0.92734,0,0.41549,0.79383,0.92108,0.72691,0.36403],[0.59397,0.4978,1,0.15869,0.83697,0.27765,0.17087],[0.37374,0.8982,0.22666,0.02512,0.0692,0.87859,0.35059],[0.78622,0,0.1619,0.26527,0.72411,0.81898,0],[0.58448,0.16921,0.43119,0.23704,0.83302,0.45559,0.33747],[0.53959,0.57756,0.89846,0.15869,0.75638,0.26278,0.17087],[0.3981,0.51811,0.27098,0,0.45972,0.81086,0.19825],[0.1683,0.07608,0.65498,0,0.21385,1,0.39086],[0.37374,0.8982,0.22666,0.02512,0.14432,0.87859,0.35059],[0.35925,0.2978,0.56128,0.06683,0.76706,0.58215,0],[0.77685,0.28364,0.30632,0.0154,0.31501,1,0],[0.8127,0,1,0.65806,0.75052,0.72199,0.33306],[0.69541,0.17539,1,0.10617,0.41169,0.40793,0.11147],[1,0.02296,0.89696,0.1061,0.71931,0.32009,0.18507],[0.25954,0.76815,0.03704,0,0,0.76221,0.23558],[0.19518,0.81201,0.61725,0.26339,0.39208,0.88261,0.12376],[0.34097,0.96332,0.1638,0.0487,0.24891,0.90702,0.13525],[0.89627,0.26903,0.7806,0.28023,0.68077,0.89037,0.22278],[0.52546,0.87271,0.75516,0,0,0.02743,0.2361],[0.21323,0.84324,0.58369,0.26635,0.38914,0.51294,0.04277],[0.88953,0.43389,0.99365,0.50463,0.41749,0.8022,0.54032],[0.36716,0.49999,0.20547,0.11973,0.44597,0.86656,0.28888],[0.7385,0.21441,0.34091,0.58938,0.73902,0.81651,0],[0.2383,0.94512,0.63672,0.37332,0.04275,0.44451,0.12376],[0.4792,0.44821,0.95481,0,0,0.3853,0.17457],[0.6332,0.44437,0.93146,0,0.39515,0.67329,0.53481],[0.36716,0.49999,0.27098,0.02835,0.59611,0.86656,0.2943],[0.4792,0.44821,0.95481,0,0.13746,0.3853,0.24946],[0.55122,0.53924,1,0,0.09076,0.49906,0.15726],[0.89883,0.32546,0.55467,0.70149,0.89185,0.83206,0.36273],[0.21175,0.96458,0.58369,0.26635,0.36358,0.49714,0.14051],[0.81589,0.0811,0.78084,0,0.71486,0.12323,0.60386],[0.71321,0.62214,0.98911,0.11922,0.08546,0.51622,0.21974],[0.95295,0,0.51801,0.48663,0.29968,0.30909,0.06047],[0.47593,0.68957,0.90175,0.37016,0.86664,0.92176,0.10546],[0.58448,0.16921,0.43119,0.23704,0.90719,0.4451,0.22979],[0.65892,0.36379,0.37524,0.08016,0.61685,0.88946,0.44434],[0.94105,0.12262,0.72743,0.00952,0.20715,0.42058,0.02184],[0.32907,0.85219,0.94433,0.09143,0.09318,0.19994,0.14098]]}}</script>
+<script id="sim">
 "use strict";
 /* ------------------------------------------------------------------ *
- *  Boids school, short-sighted predator, olfactory tracking
+ *  Boids school in a 3D volume, a short-sighted predator, olfactory
+ *  tracking. Simulation and training only: nothing here touches the DOM.
  * ------------------------------------------------------------------ */
 
 function mulberry32(a){
@@ -252,39 +273,51 @@ const gauss = (rnd) => {
   while (v === 0) v = rnd();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 };
+function randomUnit(rnd){
+  const z = 2 * rnd() - 1, t = 6.283185 * rnd(), s = Math.sqrt(1 - z * z);
+  return [s * Math.cos(t), z, s * Math.sin(t)];
+}
 
 /* ---------- network ---------- */
-const N_IN = 14, N_HID = 10, N_OUT = 1;
-const W_REC = N_IN * N_HID;                    // one self-connection per hidden unit
-const W_OUT = W_REC + N_HID;                   // where the output weights start
-const GENOME = W_OUT + N_HID + 1;              // 140 + 10 + 11 = 161
-
+// directions are in the shark's own frame: "right" is where a positive turn steers,
+// "above" is where a positive climb steers
 const SENSES = [
   { label:'bias',         stage:1 },
   { label:'how close',    stage:1 },
   { label:'fish ahead',   stage:2 },
-  { label:'fish beside',  stage:2 },
+  { label:'fish right',   stage:2 },
+  { label:'fish above',   stage:2 },
   { label:'closing',      stage:3 },
   { label:'wall ahead',   stage:4 },
   { label:'wall astern',  stage:4 },
-  { label:'wall left',    stage:5 },
   { label:'wall right',   stage:5 },
+  { label:'wall left',    stage:5 },
+  { label:'wall above',   stage:5 },
+  { label:'wall below',   stage:5 },
   { label:'shoal ahead',  stage:6 },
-  { label:'shoal beside', stage:6 },
+  { label:'shoal right',  stage:6 },
+  { label:'shoal above',  stage:6 },
   { label:'scent here',   stage:7 },
-  { label:'scent beside', stage:7 },
+  { label:'scent right',  stage:7 },
+  { label:'scent above',  stage:7 },
   { label:'scent ahead',  stage:7 }
 ];
-const SCENT_IDX = [11, 12, 13];
+const OUTPUTS = ['turn', 'climb'];
+const N_IN = SENSES.length, N_HID = 12, N_OUT = OUTPUTS.length;
+const W_REC = N_IN * N_HID;                    // one self-connection per hidden unit
+const W_OUT = W_REC + N_HID;                   // output k reads g[W_OUT + k*N_HID + j]
+const B_OUT = W_OUT + N_HID * N_OUT;           // one bias per output
+const GENOME = B_OUT + N_OUT;                  // 228 + 12 + 24 + 2 = 266
+const SCENT_IDX = [15, 16, 17, 18];
 const STAGE_DESC = [
   'distance to a fish it can see',
   'adds the direction to that fish',
   'adds closing speed',
   'adds the walls fore and aft',
-  'adds the walls to each side',
+  'adds the walls around it, above and below',
   'adds the centre of the visible shoal',
-  'full sense \u2014 adds the nose',
-  'memory \u2014 the hidden units feed back'
+  'full sense — adds the nose',
+  'memory — the hidden units feed back'
 ];
 
 function randomGenome(rnd){
@@ -294,7 +327,7 @@ function randomGenome(rnd){
 }
 
 const hid = new Float32Array(N_HID);
-function think(g, sense, mask, mem, recur){
+function think(g, sense, mask, mem, recur, out){
   for (let j = 0; j < N_HID; j++){
     let s = 0; const base = j * N_IN;
     for (let i = 0; i < N_IN; i++) s += g[base + i] * (sense[i] * mask[i]);
@@ -306,85 +339,91 @@ function think(g, sense, mask, mem, recur){
     }
     hid[j] = Math.tanh(s);
   }
-  let out = g[W_OUT + N_HID];
-  for (let j = 0; j < N_HID; j++) out += g[W_OUT + j] * hid[j];
+  for (let k = 0; k < N_OUT; k++){
+    let o = g[B_OUT + k]; const base = W_OUT + k * N_HID;
+    for (let j = 0; j < N_HID; j++) o += g[base + j] * hid[j];
+    out[k] = Math.tanh(o);
+  }
   mem.set(hid);                      // what it carries into the next tick
-  return Math.tanh(out);
 }
 
 /* ---------- spatial hash ---------- */
 class Grid{
-  constructor(cell){ this.cell = cell; this.map = new Map(); this.cols = 1; }
-  rebuild(items, w){
+  constructor(cell){ this.cell = cell; this.map = new Map(); this.cols = 1; this.rows = 1; }
+  rebuild(items, w, h){
     this.map.clear();
     this.cols = Math.max(1, Math.ceil(w / this.cell));
+    this.rows = Math.max(1, Math.ceil(h / this.cell));
     for (let i = 0; i < items.length; i++){
       const f = items[i];
-      const k = Math.floor(f.y / this.cell) * this.cols + Math.floor(f.x / this.cell);
+      const k = this.key(Math.floor(f.x / this.cell), Math.floor(f.y / this.cell), Math.floor(f.z / this.cell));
       let b = this.map.get(k);
       if (!b){ b = []; this.map.set(k, b); }
       b.push(f);
     }
   }
-  near(x, y, out){
+  key(x, y, z){ return (z * (this.rows + 2) + y) * (this.cols + 2) + x; }
+  near(x, y, z, out){
     out.length = 0;
-    const cx = Math.floor(x / this.cell), cy = Math.floor(y / this.cell);
-    for (let j = -1; j <= 1; j++){
-      for (let i = -1; i <= 1; i++){
-        const b = this.map.get((cy + j) * this.cols + (cx + i));
-        if (b) for (let k = 0; k < b.length; k++) out.push(b[k]);
-      }
-    }
+    const cx = Math.floor(x / this.cell), cy = Math.floor(y / this.cell), cz = Math.floor(z / this.cell);
+    for (let k = -1; k <= 1; k++)
+      for (let j = -1; j <= 1; j++)
+        for (let i = -1; i <= 1; i++){
+          const b = this.map.get(this.key(cx + i, cy + j, cz + k));
+          if (b) for (let n = 0; n < b.length; n++) out.push(b[n]);
+        }
     return out;
   }
 }
 
 /* ---------- scent field ---------- */
-const SCELL = 25, SCENT_EVERY = 3, SCENT_DECAY = 0.978, SCENT_K = 0.08;
+const SCELL = 40, SCENT_EVERY = 3, SCENT_DECAY = 0.978, SCENT_K = 0.08;
 const SCENT_FLOOR = 0.8, SCENT_SCALE = 14;
 
 class Scent{
-  constructor(w, h){ this.set(w, h); }
-  set(w, h){
+  constructor(w, h, d){
     this.cols = Math.max(2, Math.ceil(w / SCELL));
     this.rows = Math.max(2, Math.ceil(h / SCELL));
-    const n = this.cols * this.rows;
+    this.lays = Math.max(2, Math.ceil(d / SCELL));
+    const n = this.cols * this.rows * this.lays;
     this.a = new Float32Array(n); this.b = new Float32Array(n);
   }
   clear(){ this.a.fill(0); this.b.fill(0); }
-  deposit(x, y){
-    const c = x / SCELL | 0, r = y / SCELL | 0;
-    if (c < 0 || r < 0 || c >= this.cols || r >= this.rows) return;
-    this.a[r * this.cols + c] += 1;
+  idx(c, r, l){ return (l * this.rows + r) * this.cols + c; }
+  deposit(x, y, z){
+    const c = x / SCELL | 0, r = y / SCELL | 0, l = z / SCELL | 0;
+    if (c < 0 || r < 0 || l < 0 || c >= this.cols || r >= this.rows || l >= this.lays) return;
+    this.a[this.idx(c, r, l)] += 1;
   }
+  // one blur pass along each axis, then decay: diffusion that never leaves the box
   update(){
-    const a = this.a, b = this.b, cols = this.cols, rows = this.rows;
-    const k = SCENT_K, m = 1 - 2 * k;
-    for (let r = 0; r < rows; r++){
-      const o = r * cols;
-      for (let c = 0; c < cols; c++){
-        const l = a[o + (c > 0 ? c - 1 : c)], rr = a[o + (c < cols - 1 ? c + 1 : c)];
-        b[o + c] = k * l + m * a[o + c] + k * rr;
+    const k = SCENT_K, m = 1 - 2 * k, C = this.cols, R = this.rows, L = this.lays;
+    const pass = (src, dst, stride, len, step) => {
+      for (let i = 0; i < src.length; i++){
+        const p = Math.floor(i / stride) % len;
+        const lo = p > 0 ? src[i - stride] : src[i];
+        const hi = p < len - 1 ? src[i + stride] : src[i];
+        dst[i] = (k * lo + m * src[i] + k * hi) * step;
       }
-    }
-    for (let c = 0; c < cols; c++){
-      for (let r = 0; r < rows; r++){
-        const u = b[(r > 0 ? r - 1 : r) * cols + c], d = b[(r < rows - 1 ? r + 1 : r) * cols + c];
-        a[r * cols + c] = (k * u + m * b[r * cols + c] + k * d) * SCENT_DECAY;
-      }
-    }
+    };
+    pass(this.a, this.b, 1, C, 1);
+    pass(this.b, this.a, C, R, 1);
+    pass(this.a, this.b, C * R, L, SCENT_DECAY);
+    const t = this.a; this.a = this.b; this.b = t;
   }
-  sample(x, y){
-    const fx = x / SCELL - 0.5, fy = y / SCELL - 0.5;
-    let c0 = Math.floor(fx), r0 = Math.floor(fy);
-    const tx = fx - c0, ty = fy - r0;
-    const cm = this.cols - 1, rm = this.rows - 1;
-    const c1 = Math.min(cm, Math.max(0, c0 + 1)), r1 = Math.min(rm, Math.max(0, r0 + 1));
-    c0 = Math.min(cm, Math.max(0, c0)); r0 = Math.min(rm, Math.max(0, r0));
-    const a = this.a;
-    const top = a[r0 * this.cols + c0] * (1 - tx) + a[r0 * this.cols + c1] * tx;
-    const bot = a[r1 * this.cols + c0] * (1 - tx) + a[r1 * this.cols + c1] * tx;
-    return top * (1 - ty) + bot * ty;
+  sample(x, y, z){
+    const fx = Math.min(this.cols - 1, Math.max(0, x / SCELL - 0.5));
+    const fy = Math.min(this.rows - 1, Math.max(0, y / SCELL - 0.5));
+    const fz = Math.min(this.lays - 1, Math.max(0, z / SCELL - 0.5));
+    const c0 = Math.floor(fx), r0 = Math.floor(fy), l0 = Math.floor(fz);
+    const c1 = Math.min(this.cols - 1, c0 + 1), r1 = Math.min(this.rows - 1, r0 + 1), l1 = Math.min(this.lays - 1, l0 + 1);
+    const tx = fx - c0, ty = fy - r0, tz = fz - l0, a = this.a;
+    const lerp2 = l => {
+      const top = a[this.idx(c0, r0, l)] * (1 - tx) + a[this.idx(c1, r0, l)] * tx;
+      const bot = a[this.idx(c0, r1, l)] * (1 - tx) + a[this.idx(c1, r1, l)] * tx;
+      return top * (1 - ty) + bot * ty;
+    };
+    return lerp2(l0) * (1 - tz) + lerp2(l1) * tz;
   }
 }
 
@@ -397,9 +436,9 @@ const TRAITS = [
   { label:'stay with the group',     lo:0.1, hi:1.3, unit:'' },
   { label:'how hard to bolt',        lo:0,   hi:6,   unit:'' },
   { label:'how soon to bolt',        lo:50,  hi:230, unit:' units' },
-  { label:'which way to bolt',       lo:0,   hi:120, unit:'\u00b0 off' }
+  { label:'which way to bolt',       lo:0,   hi:120, unit:'° off' }
 ];
-// where the school starts: Reynolds' weights, the ones in the original
+// where the school starts: Reynolds' weights
 const PREY_START = [0.696, 0.406, 0.375, 0.267, 0.500, 0.472, 0.150];
 
 function preyDecode(f){
@@ -410,9 +449,9 @@ function preyDecode(f){
   f.wCoh  = 0.1 + g[3] * 1.2;
   f.wFlee =       g[4] * 6;
   f.rFlee = 50  + g[5] * 180;
-  // how far off "straight away" this fish breaks. Which side is a coin flip at
-  // birth, not inherited, so a school fans apart instead of turning as one.
-  const jink = g[6] * 2.0944 * (f.jinkSide || 1);   // up to 120 degrees
+  // how far off "straight away" this fish breaks. Which way round is set by an
+  // axis drawn at birth, not inherited, so a school bursts apart instead of turning as one.
+  const jink = g[6] * 2.0944;   // up to 120 degrees
   f.jinkC = Math.cos(jink); f.jinkS = Math.sin(jink);
 }
 function preyMutate(src, dst, rnd){
@@ -433,51 +472,51 @@ function preySeed(rnd){
 }
 
 /* ---------- world ---------- */
+const ARENA = [700, 350, 700];               // x, y (up), z
 const FISH_SPEED = 2.45, FISH_FORCE = 0.15;
 const R_SEP = 19;
 const INCOME = 1.0, UPKEEP = 0.48, WATCH_COST = 0.08, ALERT_COST = 0.06, PRIME_COST = 0.05,
       BURST_COST = 1.6, COND_TAU = 0.0035;
-const SHARK_SPEED = 3.35, SHARK_TURN = 0.062, CATCH = 11;
+const SHARK_SPEED = 3.35, SHARK_TURN = 0.062, CATCH = 13, PITCH_MAX = 1.0;
 const VISION = 160, FOV_COS = Math.cos(75 * Math.PI / 180);
-const WALL_RANGE = 1000;   // the walls are always felt: never a blank input vector
+const WALL_RANGE = 800;   // the walls are always felt: never a blank input vector
 
 class World{
-  constructor(w, h, n){
-    this.w = w; this.h = h; this.n = n;
+  constructor(w, h, d, n){
+    this.w = w; this.h = h; this.d = d; this.n = n;
     this.fish = [];
     this.grid = new Grid(R_MAX);
     this.scratch = [];
     this.sense = new Float32Array(N_IN);
     this.mem = new Float32Array(N_HID);
-    this.scent = new Scent(w, h);
+    this.out = new Float32Array(N_OUT);
+    this.scent = new Scent(w, h, d);
     this.events = [];
     this.reset(mulberry32(1));
   }
-  resize(w, h){ this.w = w; this.h = h; this.scent.set(w, h); }
   reset(rnd, pool){
     this.rnd = rnd;
     this.seedPool = pool || null;
     this.fish.length = 0;
-    const cx = this.w * (0.3 + rnd() * 0.4), cy = this.h * (0.3 + rnd() * 0.4);
+    const cx = this.w * (0.3 + rnd() * 0.4), cy = this.h * (0.3 + rnd() * 0.4), cz = this.d * (0.3 + rnd() * 0.4);
+    const spread = Math.min(this.w, this.h, this.d) * 0.3;
     for (let i = 0; i < this.n; i++){
-      const a = rnd() * 6.283, r = Math.sqrt(rnd()) * Math.min(this.w, this.h) * 0.22;
-      const d = rnd() * 6.283;
+      const p = randomUnit(rnd), r = Math.cbrt(rnd()) * spread, v = randomUnit(rnd);
       const f = {
-        x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r,
-        vx: Math.cos(d) * FISH_SPEED, vy: Math.sin(d) * FISH_SPEED,
-        flee: 0, ang: d, g: new Float32Array(PREY_GENES), cond: 0.2,
-        jinkSide: rnd() < 0.5 ? 1 : -1
+        x: cx + p[0] * r, y: cy + p[1] * r, z: cz + p[2] * r,
+        vx: v[0] * FISH_SPEED, vy: v[1] * FISH_SPEED, vz: v[2] * FISH_SPEED,
+        flee: 0, g: new Float32Array(PREY_GENES), cond: 0.2, axis: randomUnit(rnd)
       };
       if (pool) preyMutate(pool[i % pool.length], f.g, rnd);
       else f.g.set(preySeed(rnd));
       preyDecode(f);
       this.fish.push(f);
     }
-    this.cx = cx; this.cy = cy;
-    this.mem.fill(0);
+    this.cx = cx; this.cy = cy; this.cz = cz;
+    this.mem.fill(0); this.out.fill(0);
     // the shark starts in the far corner: it must find them before it can hunt them
-    this.sx = this.w - cx; this.sy = this.h - cy;
-    this.head = rnd() * 6.283;
+    this.sx = this.w - cx; this.sy = this.h - cy; this.sz = this.d - cz;
+    this.yaw = rnd() * 6.283; this.pitch = 0;
     this.catches = 0; this.wallHits = 0; this.shape = 0; this.seen = 0;
     this.scent.clear();
     this.events.length = 0;
@@ -494,13 +533,9 @@ class World{
       // the parent is drawn in proportion to how well it has been feeding, so
       // being jumpy is paid for in descendants rather than in corpses
       let tot = 0;
-      for (let i = 0; i < this.fish.length; i++){
-        const o = this.fish[i];
-        if (o !== f && o.cond > 0) tot += o.cond * o.cond;
-      }
+      for (const o of this.fish) if (o !== f && o.cond > 0) tot += o.cond * o.cond;
       let pick = rnd() * tot, chosen = null;
-      for (let i = 0; i < this.fish.length; i++){
-        const o = this.fish[i];
+      for (const o of this.fish){
         if (o === f || o.cond <= 0) continue;
         pick -= o.cond * o.cond;
         if (pick <= 0){ chosen = o; break; }
@@ -508,60 +543,61 @@ class World{
       src = (chosen || this.fish[(rnd() * this.fish.length) | 0]).g;
     }
     preyMutate(src, f.g, rnd);
-    f.jinkSide = rnd() < 0.5 ? 1 : -1;
+    f.axis = randomUnit(rnd);
     preyDecode(f);
-    const a = rnd() * 6.283, r = 60 + rnd() * 70;
-    f.x = Math.max(20, Math.min(this.w - 20, this.cx + Math.cos(a) * r));
-    f.y = Math.max(20, Math.min(this.h - 20, this.cy + Math.sin(a) * r));
-    f.vx = -Math.cos(a) * FISH_SPEED; f.vy = -Math.sin(a) * FISH_SPEED;
+    const p = randomUnit(rnd), r = 60 + rnd() * 70;
+    f.x = Math.max(20, Math.min(this.w - 20, this.cx + p[0] * r));
+    f.y = Math.max(20, Math.min(this.h - 20, this.cy + p[1] * r));
+    f.z = Math.max(20, Math.min(this.d - 20, this.cz + p[2] * r));
+    f.vx = -p[0] * FISH_SPEED; f.vy = -p[1] * FISH_SPEED; f.vz = -p[2] * FISH_SPEED;
     f.flee = 0; f.cond = 0.15;
   }
   stepFish(){
     const g = this.grid, sc = this.scratch;
-    g.rebuild(this.fish, this.w);
-    const sx = this.sx, sy = this.sy;
+    g.rebuild(this.fish, this.w, this.h);
+    const sx = this.sx, sy = this.sy, sz = this.sz;
     for (let i = 0; i < this.fish.length; i++){
       const f = this.fish[i];
-      const near = g.near(f.x, f.y, sc);
-      let spx = 0, spy = 0, alx = 0, aly = 0, cox = 0, coy = 0, cnt = 0;
+      const near = g.near(f.x, f.y, f.z, sc);
+      let spx = 0, spy = 0, spz = 0, alx = 0, aly = 0, alz = 0, cox = 0, coy = 0, coz = 0, cnt = 0;
+      const R2 = f.R * f.R;
       for (let k = 0; k < near.length; k++){
         const o = near[k];
         if (o === f) continue;
-        const dx = f.x - o.x, dy = f.y - o.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 > f.R * f.R || d2 === 0) continue;
-        const d = Math.sqrt(d2);
+        const dx = f.x - o.x, dy = f.y - o.y, dz = f.z - o.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > R2 || d2 === 0) continue;
         cnt++;
-        alx += o.vx; aly += o.vy;
-        cox += o.x;  coy += o.y;
-        if (d < R_SEP){ spx += dx / d2 * 9; spy += dy / d2 * 9; }
+        alx += o.vx; aly += o.vy; alz += o.vz;
+        cox += o.x;  coy += o.y;  coz += o.z;
+        if (d2 < R_SEP * R_SEP){ spx += dx / d2 * 9; spy += dy / d2 * 9; spz += dz / d2 * 9; }
       }
-      let ax = 0, ay = 0;
+      let ax = 0, ay = 0, az = 0;
+      const steer = (tx, ty, tz, w) => {
+        const l = Math.hypot(tx, ty, tz) || 1;
+        ax += (tx / l * FISH_SPEED - f.vx) * w;
+        ay += (ty / l * FISH_SPEED - f.vy) * w;
+        az += (tz / l * FISH_SPEED - f.vz) * w;
+      };
       if (cnt){
-        alx /= cnt; aly /= cnt;
-        const al = Math.hypot(alx, aly) || 1;
-        ax += (alx / al * FISH_SPEED - f.vx) * f.wAli;
-        ay += (aly / al * FISH_SPEED - f.vy) * f.wAli;
-        const hx = cox / cnt - f.x, hy = coy / cnt - f.y;
-        const hl = Math.hypot(hx, hy) || 1;
-        ax += (hx / hl * FISH_SPEED - f.vx) * f.wCoh;
-        ay += (hy / hl * FISH_SPEED - f.vy) * f.wCoh;
+        steer(alx, aly, alz, f.wAli);
+        steer(cox / cnt - f.x, coy / cnt - f.y, coz / cnt - f.z, f.wCoh);
       }
-      if (spx || spy){
-        const sl = Math.hypot(spx, spy) || 1;
-        ax += (spx / sl * FISH_SPEED - f.vx) * f.wSep;
-        ay += (spy / sl * FISH_SPEED - f.vy) * f.wSep;
-      }
-      const fx = f.x - sx, fy = f.y - sy;
-      const fd = Math.hypot(fx, fy);
+      if (spx || spy || spz) steer(spx, spy, spz, f.wSep);
+      const fx = f.x - sx, fy = f.y - sy, fz = f.z - sz;
+      const fd = Math.hypot(fx, fy, fz);
       if (fd < f.rFlee){
         const urge = 1 - fd / f.rFlee;
         f.flee = Math.max(f.flee, urge);
         // break at an angle to the predator rather than straight down its line
-        const ux = fx / (fd || 1), uy = fy / (fd || 1);
-        const bx = ux * f.jinkC - uy * f.jinkS, by = ux * f.jinkS + uy * f.jinkC;
+        const ux = fx / (fd || 1), uy = fy / (fd || 1), uz = fz / (fd || 1);
+        const a = f.axis;
+        let px = uy * a[2] - uz * a[1], py = uz * a[0] - ux * a[2], pz = ux * a[1] - uy * a[0];
+        const pl = Math.hypot(px, py, pz) || 1; px /= pl; py /= pl; pz /= pl;
+        const bx = ux * f.jinkC + px * f.jinkS, by = uy * f.jinkC + py * f.jinkS, bz = uz * f.jinkC + pz * f.jinkS;
         ax += (bx * FISH_SPEED - f.vx) * f.wFlee * urge;
         ay += (by * FISH_SPEED - f.vy) * f.wFlee * urge;
+        az += (bz * FISH_SPEED - f.vz) * f.wFlee * urge;
       }
       f.flee *= 0.93;
       const m = 60;
@@ -569,101 +605,114 @@ class World{
       if (f.x > this.w - m) ax -= (1 - (this.w - f.x) / m) * 0.9;
       if (f.y < m) ay += (1 - f.y / m) * 0.9;
       if (f.y > this.h - m) ay -= (1 - (this.h - f.y) / m) * 0.9;
+      if (f.z < m) az += (1 - f.z / m) * 0.9;
+      if (f.z > this.d - m) az -= (1 - (this.d - f.z) / m) * 0.9;
 
-      const al2 = Math.hypot(ax, ay);
-      if (al2 > FISH_FORCE){ ax = ax / al2 * FISH_FORCE; ay = ay / al2 * FISH_FORCE; }
-      f.vx += ax; f.vy += ay;
-      const sp = Math.hypot(f.vx, f.vy);
+      const al2 = Math.hypot(ax, ay, az);
+      if (al2 > FISH_FORCE){ ax = ax / al2 * FISH_FORCE; ay = ay / al2 * FISH_FORCE; az = az / al2 * FISH_FORCE; }
+      f.vx += ax; f.vy += ay; f.vz += az;
+      const sp = Math.hypot(f.vx, f.vy, f.vz);
       const top = FISH_SPEED * (1 + 0.45 * f.flee);
-      if (sp > top){ f.vx = f.vx / sp * top; f.vy = f.vy / sp * top; }
-      else if (sp < FISH_SPEED * 0.6){ const q = (sp || 1); f.vx = f.vx / q * FISH_SPEED * 0.6; f.vy = f.vy / q * FISH_SPEED * 0.6; }
-      f.x += f.vx; f.y += f.vy;
+      if (sp > top){ const q = top / sp; f.vx *= q; f.vy *= q; f.vz *= q; }
+      else if (sp < FISH_SPEED * 0.6){ const q = FISH_SPEED * 0.6 / (sp || 1); f.vx *= q; f.vy *= q; f.vz *= q; }
+      f.x += f.vx; f.y += f.vy; f.z += f.vz;
       if (f.x < 2){ f.x = 2; f.vx = Math.abs(f.vx); }
       if (f.x > this.w - 2){ f.x = this.w - 2; f.vx = -Math.abs(f.vx); }
       if (f.y < 2){ f.y = 2; f.vy = Math.abs(f.vy); }
       if (f.y > this.h - 2){ f.y = this.h - 2; f.vy = -Math.abs(f.vy); }
-      f.ang = Math.atan2(f.vy, f.vx);
+      if (f.z < 2){ f.z = 2; f.vz = Math.abs(f.vz); }
+      if (f.z > this.d - 2){ f.z = this.d - 2; f.vz = -Math.abs(f.vz); }
       // a fish that is bolting is not feeding, and watchfulness costs something
       // even when nothing happens. Condition is a slow average of how well it eats.
-      const spd = Math.hypot(f.vx, f.vy);
+      const spd = Math.hypot(f.vx, f.vy, f.vz);
       const net = INCOME * (1 - f.flee)
                 - (UPKEEP + WATCH_COST * (f.R / 58) + ALERT_COST * (f.rFlee / 135)
                    + PRIME_COST * (f.wFlee / 3) + BURST_COST * Math.max(0, spd / FISH_SPEED - 1));
       f.cond += (net - f.cond) * COND_TAU;
-      this.scent.deposit(f.x, f.y);
+      this.scent.deposit(f.x, f.y, f.z);
     }
+  }
+  // the shark's own frame: forward, right (where a positive turn goes), up (where a positive climb goes)
+  frame(){
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw), cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    this.fx = cp * cy; this.fy = sp; this.fz = cp * sy;
+    this.rx = -sy;     this.ry = 0;  this.rz = cy;
+    this.ux = -sp * cy; this.uy = cp; this.uz = -sp * sy;
   }
   /* --- what the shark can feel: short sight, then the nose --- */
   senseNow(){
+    this.frame();
     const s = this.sense;
-    const cos = Math.cos(this.head), sin = Math.sin(this.head);
+    const fx = this.fx, fy = this.fy, fz = this.fz, rx = this.rx, rz = this.rz, ux = this.ux, uy = this.uy, uz = this.uz;
     let best = null, bd = Infinity, trueBest = Infinity;
-    let mx = 0, my = 0, seen = 0, tx = 0, ty = 0;
+    let mx = 0, my = 0, mz = 0, seen = 0, tx = 0, ty = 0, tz = 0;
     const V2 = VISION * VISION;
     for (let i = 0; i < this.fish.length; i++){
       const f = this.fish[i];
-      tx += f.x; ty += f.y;
-      const dx = f.x - this.sx, dy = f.y - this.sy;
-      const d2 = dx * dx + dy * dy;
+      tx += f.x; ty += f.y; tz += f.z;
+      const dx = f.x - this.sx, dy = f.y - this.sy, dz = f.z - this.sz;
+      const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < trueBest) trueBest = d2;
       if (d2 > V2) continue;
       const d = Math.sqrt(d2) || 1;
-      if ((dx * cos + dy * sin) / d < FOV_COS) continue;   // behind the head
+      if ((dx * fx + dy * fy + dz * fz) / d < FOV_COS) continue;   // outside the cone
       seen++;
-      mx += f.x; my += f.y;
+      mx += f.x; my += f.y; mz += f.z;
       if (d2 < bd){ bd = d2; best = f; }
     }
     this.seen = seen;
     const nf = this.fish.length || 1;
-    this.cx = tx / nf; this.cy = ty / nf;
+    this.cx = tx / nf; this.cy = ty / nf; this.cz = tz / nf;
     s[0] = 1;
     if (best){
-      const d = Math.sqrt(bd);
+      const d = Math.sqrt(bd) || 1;
       s[1] = 1 - d / VISION;
-      const dx = best.x - this.sx, dy = best.y - this.sy, dl = d || 1;
-      const ux = dx / dl, uy = dy / dl;
-      s[2] =  ux * cos + uy * sin;
-      s[3] = -ux * sin + uy * cos;
-      const rvx = best.vx - cos * SHARK_SPEED, rvy = best.vy - sin * SHARK_SPEED;
-      s[4] = Math.max(-1, Math.min(1, -(rvx * ux + rvy * uy) / 5));
-      mx /= seen; my /= seen;
-      const gx = mx - this.sx, gy = my - this.sy, gl = Math.hypot(gx, gy) || 1;
-      s[9]  =  (gx / gl) * cos + (gy / gl) * sin;
-      s[10] = -(gx / gl) * sin + (gy / gl) * cos;
-      this.mx = mx; this.my = my;
+      const ex = (best.x - this.sx) / d, ey = (best.y - this.sy) / d, ez = (best.z - this.sz) / d;
+      s[2] = ex * fx + ey * fy + ez * fz;
+      s[3] = ex * rx + ez * rz;
+      s[4] = ex * ux + ey * uy + ez * uz;
+      const rvx = best.vx - fx * SHARK_SPEED, rvy = best.vy - fy * SHARK_SPEED, rvz = best.vz - fz * SHARK_SPEED;
+      s[5] = Math.max(-1, Math.min(1, -(rvx * ex + rvy * ey + rvz * ez) / 5));
+      mx /= seen; my /= seen; mz /= seen;
+      const gx = mx - this.sx, gy = my - this.sy, gz = mz - this.sz, gl = Math.hypot(gx, gy, gz) || 1;
+      s[12] = (gx * fx + gy * fy + gz * fz) / gl;
+      s[13] = (gx * rx + gz * rz) / gl;
+      s[14] = (gx * ux + gy * uy + gz * uz) / gl;
     } else {
-      s[1] = s[2] = s[3] = s[4] = s[9] = s[10] = 0;
-      this.mx = this.my = null;
+      s[1] = s[2] = s[3] = s[4] = s[5] = s[12] = s[13] = s[14] = 0;
     }
-    s[5] = this.wall(cos, sin);
-    s[6] = this.wall(-cos, -sin);
-    s[7] = this.wall(sin, -cos);
-    s[8] = this.wall(-sin, cos);
+    s[6]  = this.wall( fx,  fy,  fz);
+    s[7]  = this.wall(-fx, -fy, -fz);
+    s[8]  = this.wall( rx,   0,  rz);
+    s[9]  = this.wall(-rx,   0, -rz);
+    s[10] = this.wall( ux,  uy,  uz);
+    s[11] = this.wall(-ux, -uy, -uz);
 
-    // olfaction: two nostrils at the snout, and a reference point astern
-    const nx = this.sx + cos * 18, ny = this.sy + sin * 18;
-    const lx = -sin * 9, ly = cos * 9;
-    const L = this.scent.sample(nx + lx, ny + ly);
-    const R = this.scent.sample(nx - lx, ny - ly);
-    const F = L + R;
-    const A = this.scent.sample(this.sx - cos * 34, this.sy - sin * 34) * 2;
+    // olfaction: four nostrils round the snout, and a reference point astern
+    const nx = this.sx + fx * 18, ny = this.sy + fy * 18, nz = this.sz + fz * 18;
+    const L = this.scent.sample(nx + rx * 10, ny, nz + rz * 10);
+    const R = this.scent.sample(nx - rx * 10, ny, nz - rz * 10);
+    const U = this.scent.sample(nx + ux * 10, ny + uy * 10, nz + uz * 10);
+    const D = this.scent.sample(nx - ux * 10, ny - uy * 10, nz - uz * 10);
+    const F = (L + R + U + D) / 2;
+    const A = this.scent.sample(this.sx - fx * 34, this.sy - fy * 34, this.sz - fz * 34) * 2;
     if (F + A < SCENT_FLOOR){
-      s[11] = s[12] = s[13] = 0;
+      s[15] = s[16] = s[17] = s[18] = 0;
     } else {
-      s[11] = Math.tanh(F / SCENT_SCALE);
-      s[12] = (L - R) / (L + R + 1e-3);
-      s[13] = (F - A) / (F + A + 1e-3);
+      s[15] = Math.tanh(F / SCENT_SCALE);
+      s[16] = (L - R) / (L + R + 1e-3);
+      s[17] = (U - D) / (U + D + 1e-3);
+      s[18] = (F - A) / (F + A + 1e-3);
     }
     this.target = best;
     this.nearest = Math.sqrt(trueBest);
     return s;
   }
-  wall(dx, dy){
+  wall(dx, dy, dz){
     let t = Infinity;
-    if (dx > 1e-6) t = Math.min(t, (this.w - this.sx) / dx);
-    else if (dx < -1e-6) t = Math.min(t, -this.sx / dx);
-    if (dy > 1e-6) t = Math.min(t, (this.h - this.sy) / dy);
-    else if (dy < -1e-6) t = Math.min(t, -this.sy / dy);
+    if (dx > 1e-6) t = Math.min(t, (this.w - this.sx) / dx); else if (dx < -1e-6) t = Math.min(t, -this.sx / dx);
+    if (dy > 1e-6) t = Math.min(t, (this.h - this.sy) / dy); else if (dy < -1e-6) t = Math.min(t, -this.sy / dy);
+    if (dz > 1e-6) t = Math.min(t, (this.d - this.sz) / dz); else if (dz < -1e-6) t = Math.min(t, -this.sz / dz);
     if (!isFinite(t)) return 0;
     return 1 - Math.min(1, t / WALL_RANGE);
   }
@@ -671,30 +720,33 @@ class World{
     this.stepFish();
     if (this.t % SCENT_EVERY === 0) this.scent.update();
     const s = this.senseNow();
-    const turn = think(genome, s, mask, this.mem, recur);
-    this.turn = turn;
-    this.head += turn * SHARK_TURN;
-    const speed = SHARK_SPEED * (1 - 0.3 * Math.abs(turn));
-    this.sx += Math.cos(this.head) * speed;
-    this.sy += Math.sin(this.head) * speed;
-    let hit = false;
-    if (this.sx < 8){ this.sx = 8; hit = true; }
-    if (this.sx > this.w - 8){ this.sx = this.w - 8; hit = true; }
-    if (this.sy < 8){ this.sy = 8; hit = true; }
-    if (this.sy > this.h - 8){ this.sy = this.h - 8; hit = true; }
-    if (hit){ this.head += (this.rnd() - 0.5) * 0.5 + 0.35; this.wallHits++; }
+    think(genome, s, mask, this.mem, recur, this.out);
+    const turn = this.out[0], climb = this.out[1];
+    this.yaw += turn * SHARK_TURN;
+    this.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, this.pitch + climb * SHARK_TURN));
+    this.frame();
+    // hard manoeuvres cost ground
+    const speed = SHARK_SPEED * (1 - 0.3 * Math.min(1, Math.max(Math.abs(turn), Math.abs(climb))));
+    this.sx += this.fx * speed; this.sy += this.fy * speed; this.sz += this.fz * speed;
+    let hitSide = false, hitFlat = false;
+    if (this.sx < 8){ this.sx = 8; hitSide = true; }
+    if (this.sx > this.w - 8){ this.sx = this.w - 8; hitSide = true; }
+    if (this.sz < 8){ this.sz = 8; hitSide = true; }
+    if (this.sz > this.d - 8){ this.sz = this.d - 8; hitSide = true; }
+    if (this.sy < 8){ this.sy = 8; hitFlat = true; }
+    if (this.sy > this.h - 8){ this.sy = this.h - 8; hitFlat = true; }
+    if (hitSide) this.yaw += (this.rnd() - 0.5) * 0.5 + 0.35;
+    if (hitFlat) this.pitch *= -0.5;
+    if (hitSide || hitFlat){ this.wallHits++; this.frame(); }
 
-    const hx = this.sx + Math.cos(this.head) * 16, hy = this.sy + Math.sin(this.head) * 16;
+    const hx = this.sx + this.fx * 16, hy = this.sy + this.fy * 16, hz = this.sz + this.fz * 16;
     for (let i = this.fish.length - 1; i >= 0; i--){
       const f = this.fish[i];
-      if ((f.x - hx) ** 2 + (f.y - hy) ** 2 < CATCH * CATCH){
+      if ((f.x - hx) ** 2 + (f.y - hy) ** 2 + (f.z - hz) ** 2 < CATCH * CATCH){
         this.catches++;
-        this.events.push({ x: f.x, y: f.y, t: 0 });
-        if (respawn){
-          this.respawnPrey(f);
-        } else {
-          this.fish.splice(i, 1);
-        }
+        this.events.push({ x: f.x, y: f.y, z: f.z, t: 0 });
+        if (respawn) this.respawnPrey(f);
+        else this.fish.splice(i, 1);
       }
     }
     // shaping uses the true nearest fish: it is training pressure, not a sense
@@ -703,7 +755,7 @@ class World{
   }
   meanCond(){
     let m = 0;
-    for (let i = 0; i < this.fish.length; i++) m += this.fish[i].cond;
+    for (const f of this.fish) m += f.cond;
     return m / (this.fish.length || 1);
   }
   fitness(){ return this.catches * 120 + this.shape - this.wallHits * 1.2; }
@@ -738,7 +790,7 @@ const Trainer = {
     this.best = randomGenome(rnd);
     this.bestEaten = 0;
     this.history = [];
-    this.world = new World(1400, 900, TRAIN_FISH);
+    this.world = new World(ARENA[0], ARENA[1], ARENA[2], TRAIN_FISH);
     this.pool = Array.from({ length: TRAIN_FISH }, () => preySeed(rnd));
     this.recordEaten = null; this.recordCond = null;
     this.seed = seed + 1; this.probeSeed = seed + 104729;
@@ -877,206 +929,419 @@ const Trainer = {
   }
 };
 
+/* ---------- saving and restoring a brain ---------- */
+const BRAIN_FORMAT = 'shark-brain', BRAIN_VERSION = 2;
+const r5 = x => Math.round(x * 1e5) / 1e5;
+
+function brainJSON(){
+  return JSON.stringify({
+    format: BRAIN_FORMAT,
+    version: BRAIN_VERSION,
+    saved: new Date().toISOString(),
+    network: {
+      inputs: N_IN, hidden: N_HID, outputs: N_OUT,
+      activation: 'tanh',
+      recurrence: 'one leak per hidden unit, clamped to [0, 0.9]; h(t) = tanh(Wx + leak*h(t-1))',
+      senses: SENSES.map(x => x.label),
+      outputNames: OUTPUTS,
+      active: SENSES.map((x, i) => Trainer.mask[i] ? 1 : 0),
+      memoryOn: Trainer.stage >= 8,
+      output: 'turn and climb, each in [-1, 1]',
+      layout: [
+        'w_in: ' + (N_IN * N_HID) + ' values, hidden-major (unit j occupies [j*' + N_IN + ' .. j*' + N_IN + '+' + (N_IN - 1) + '])',
+        'w_rec: ' + N_HID + ' values, one per hidden unit',
+        'w_out: ' + (N_HID * N_OUT) + ' values, output-major (output k occupies [k*' + N_HID + ' .. k*' + N_HID + '+' + (N_HID - 1) + '])',
+        'b_out: ' + N_OUT + ' values'
+      ]
+    },
+    world: {
+      dimensions: 3, arena: ARENA, vision: VISION, fieldOfViewDegrees: 150,
+      sharkSpeed: SHARK_SPEED, turnRate: SHARK_TURN, pitchLimit: PITCH_MAX, catchRadius: CATCH,
+      scent: { cell: SCELL, decayPerUpdate: SCENT_DECAY, updateEveryTicks: SCENT_EVERY,
+               floor: SCENT_FLOOR, scale: SCENT_SCALE }
+    },
+    training: {
+      generation: Trainer.gen, stage: Trainer.stage, stagesTotal: LAST_STAGE,
+      bestSingleHunt: Trainer.bestEaten,
+      noseTrials: Trainer.trials,
+      noseWorking: Trainer.trials ? r5(Trainer.sumWith / Trainer.trials) : null,
+      nostrilsBlocked: Trainer.trials ? r5(Trainer.sumWithout / Trainer.trials) : null,
+      memoryTrials: Trainer.memTrials,
+      memoryWorking: Trainer.memTrials ? r5(Trainer.sumMemOn / Trainer.memTrials) : null,
+      memoryBlocked: Trainer.memTrials ? r5(Trainer.sumNoMem / Trainer.memTrials) : null
+    },
+    weights: Array.from(Trainer.best, r5),
+    prey: {
+      traits: TRAITS.map(t => ({ name: t.label, min: t.lo, max: t.hi })),
+      note: 'each pool entry is one fish genome, values in [0,1], decoded linearly into the ranges above',
+      pool: Trainer.pool.map(g => Array.from(g, r5))
+    }
+  });
+}
+
+// returns an error message, or null once the brain is in place
+function applyBrainData(d){
+  if (!d || (d.format !== BRAIN_FORMAT && d.format !== 'pelagic-brain')) return 'That file is not a saved brain.';
+  const net = d.network || {};
+  if (net.inputs !== N_IN || net.hidden !== N_HID || (net.outputs || 1) !== N_OUT){
+    return 'That brain is a ' + net.inputs + '–' + net.hidden + '–' + (net.outputs || 1)
+      + ' network, from the flat version; this shark is ' + N_IN + '–' + N_HID + '–' + N_OUT + '.';
+  }
+  if (!Array.isArray(d.weights) || d.weights.length !== GENOME){
+    return 'Expected ' + GENOME + ' weights, found ' + (d.weights ? d.weights.length : 0) + '.';
+  }
+  Trainer.best = Float32Array.from(d.weights);
+  const t = d.training || {};
+  Trainer.stage = Math.min(LAST_STAGE, Math.max(1, t.stage || LAST_STAGE));
+  Trainer.mask = maskFor(Trainer.stage);
+  Trainer.noNose = maskMinusScent(Trainer.mask);
+  Trainer.gen = t.generation || 0;
+  Trainer.bestEaten = t.bestSingleHunt || 0;
+  // the loaded brain becomes the elite; the rest of the population are its variants
+  const rnd = Trainer.rnd;
+  Trainer.pop = [Trainer.best.slice()];
+  while (Trainer.pop.length < POP){
+    const c = Trainer.best.slice();
+    for (let k = 0; k < GENOME; k++) if (rnd() < 0.14) c[k] += gauss(rnd) * 0.2;
+    Trainer.pop.push(c);
+  }
+  if (d.prey && Array.isArray(d.prey.pool) && d.prey.pool.length && d.prey.pool[0].length === PREY_GENES){
+    Trainer.pool = d.prey.pool.map(g => Float32Array.from(g));
+  }
+  Trainer.history = []; Trainer.stageGens = 0; Trainer.fresh = null; Trainer.freshAge = 99;
+  Trainer.phase = 'eval'; Trainer.i = 0; Trainer.pi = 0;
+  Trainer.trials = 0; Trainer.sumWith = 0; Trainer.sumWithout = 0;
+  Trainer.memTrials = 0; Trainer.sumMemOn = 0; Trainer.sumNoMem = 0;
+  Trainer.recordEaten = null; Trainer.recordCond = null;
+  Trainer.beginIndividual();
+  return null;
+}
+</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const el = id => document.getElementById(id);
+const [AW, AH, AD] = ARENA;
+
 /* ---------- theme ---------- */
 const T = {};
-function hexToRgb(h){
-  h = h.replace('#', '').trim();
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  const v = parseInt(h, 16);
-  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-}
 function readTheme(){
   const cs = getComputedStyle(document.documentElement);
-  ['bg','water','hair','hair-soft','ink','soft','faint','pos','neg','alarm','fish','shark','shark-edge','scent']
+  ['bg','water','hair','hair-soft','ink','soft','faint','pos','neg','alarm','fish','shark','edge','scent']
     .forEach(k => T[k] = cs.getPropertyValue('--' + k).trim());
-  T.scentRgb = hexToRgb(T.scent || '#4d7f93');
-  T.scentA = parseFloat(cs.getPropertyValue('--scent-a')) || 0.4;
+  T.scentA = parseFloat(cs.getPropertyValue('--scent-a')) || 0.45;
 }
 readTheme();
+
+/* ---------- the display tank: a window onto the gene pool training is breeding ---------- */
+Trainer.init(20260920);
+const show = new World(AW, AH, AD, 160);
+show.usePool = true;
+show.reset(mulberry32(7), Trainer.pool);
+
+/* ---------- scene ---------- */
+const view = el('view');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
+catch (e) {
+  view.innerHTML = '<div class="nogl">This needs WebGL, which this browser has turned off. Training still runs in the panel.</div>';
+}
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 8000);
+camera.position.set(760, 440, 920);
+let controls = null;
+const toWorld = (x, y, z, v) => v.set(x - AW / 2, y - AH / 2, z - AD / 2);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x223038, 1.5);
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(300, 900, 450);
+scene.add(hemi, sun);
+scene.fog = new THREE.Fog(0x000000, 900, 3200);
+
+// the tank: its edges, and a floor to stand the volume on
+const tank = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(AW, AH, AD)),
+  new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 }));
+const floor = new THREE.GridHelper(AW, 12);
+floor.position.y = -AH / 2;
+floor.material.transparent = true; floor.material.opacity = 0.45;
+scene.add(tank, floor);
+
+// fish: one instanced cone each, nose along +Z
+const fishGeo = new THREE.ConeGeometry(2.4, 10, 6);
+fishGeo.rotateX(Math.PI / 2);
+const fishMat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0, flatShading: true });
+const fishMesh = new THREE.InstancedMesh(fishGeo, fishMat, show.n);
+fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+fishMesh.setColorAt(0, new THREE.Color());
+fishMesh.frustumCulled = false;
+scene.add(fishMesh);
+
+// the shark: a lathed body, dorsal fin, tail and pectorals, nose along +Z
+function sharkGeometry(){
+  const prof = [[0,-21],[1.6,-19],[3.2,-14],[5.2,-6],[6.4,2],[6,9],[4.6,15],[2.6,20],[0.9,23],[0,24]]
+    .map(([r, y]) => new THREE.Vector2(r, y));
+  const body = new THREE.LatheGeometry(prof, 14);
+  body.rotateX(Math.PI / 2);
+  body.scale(1, 0.78, 1);
+  const tri = (...p) => p.flat();
+  const fins = new THREE.BufferGeometry();
+  fins.setAttribute('position', new THREE.Float32BufferAttribute([
+    ...tri([0, 4, 4], [0, 15, -6], [0, 4, -9]),            // dorsal
+    ...tri([0, 0, -18], [0, 14, -31], [0, 3, -23]),        // tail, upper lobe
+    ...tri([0, 0, -18], [0, -9, -28], [0, -2, -21]),       // tail, lower lobe
+    ...tri([4.5, -2, 7], [17, -7, -5], [4.5, -2, -1]),     // pectorals
+    ...tri([-4.5, -2, 7], [-4.5, -2, -1], [-17, -7, -5])
+  ], 3));
+  fins.computeVertexNormals();
+  return [body, fins];
+}
+const sharkMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.1, flatShading: true, side: THREE.DoubleSide });
+const shark = new THREE.Group();
+sharkGeometry().forEach(g => shark.add(new THREE.Mesh(g, sharkMat)));
+shark.scale.setScalar(1.8);
+scene.add(shark);
+
+// scent: one soft point per cell of the field, opacity from its concentration
+const sc = show.scent, cells = sc.cols * sc.rows * sc.lays;
+const scentPos = new Float32Array(cells * 3), scentV = new Float32Array(cells);
+for (let l = 0; l < sc.lays; l++) for (let r = 0; r < sc.rows; r++) for (let c = 0; c < sc.cols; c++){
+  const i = sc.idx(c, r, l);
+  scentPos[i * 3] = (c + 0.5) * SCELL - AW / 2;
+  scentPos[i * 3 + 1] = (r + 0.5) * SCELL - AH / 2;
+  scentPos[i * 3 + 2] = (l + 0.5) * SCELL - AD / 2;
+}
+const scentGeo = new THREE.BufferGeometry();
+scentGeo.setAttribute('position', new THREE.BufferAttribute(scentPos, 3));
+scentGeo.setAttribute('v', new THREE.BufferAttribute(scentV, 1).setUsage(THREE.DynamicDrawUsage));
+const scentMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  uniforms: { uColor: { value: new THREE.Color() }, uAmp: { value: 0.4 }, uSize: { value: SCELL * 1.35 }, uScale: { value: 500 } },
+  vertexShader: `
+    attribute float v; uniform float uSize, uScale; varying float vA;
+    void main(){
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mv;
+      gl_PointSize = uSize * uScale / -mv.z;
+      vA = v;
+    }`,
+  fragmentShader: `
+    uniform vec3 uColor; uniform float uAmp; varying float vA;
+    void main(){
+      vec2 c = gl_PointCoord - 0.5; float d = dot(c, c);
+      if (d > 0.25 || vA < 0.01) discard;
+      gl_FragColor = vec4(uColor, vA * uAmp * (1.0 - d * 4.0));
+    }`
+});
+const scentPts = new THREE.Points(scentGeo, scentMat);
+scentPts.frustumCulled = false;
+scene.add(scentPts);
+
+// "Show what it sees": the sight cone, the fish it has picked, and its four nostrils
+const senseG = new THREE.Group();
+const capGeo = new THREE.SphereGeometry(VISION, 40, 10, 0, Math.PI * 2, 0, 75 * Math.PI / 180);
+capGeo.rotateX(Math.PI / 2);
+const capMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false });
+const rimPts = [];
+for (let k = 0; k <= 64; k++){
+  const a = k / 64 * Math.PI * 2, r = VISION * Math.sin(75 * Math.PI / 180);
+  rimPts.push(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, VISION * Math.cos(75 * Math.PI / 180)));
+}
+const rimMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.6 });
+const noseMat = new THREE.MeshBasicMaterial();
+senseG.add(new THREE.Mesh(capGeo, capMat), new THREE.Line(new THREE.BufferGeometry().setFromPoints(rimPts), rimMat));
+for (const [x, y] of [[18, 0], [-18, 0], [0, 18], [0, -18]]){   // drawn at the shark's 1.8x scale
+  const n = new THREE.Mesh(new THREE.SphereGeometry(2.6, 8, 6), noseMat);
+  n.position.set(x, y, 18 * 1.8);
+  senseG.add(n);
+}
+senseG.visible = false;
+const aimMat = new THREE.LineBasicMaterial();
+const aimLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), aimMat);
+const aimRing = new THREE.Mesh(new THREE.RingGeometry(7, 8.5, 32), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+aimMat.color = aimRing.material.color;
+aimLine.frustumCulled = false;
+scene.add(senseG, aimLine, aimRing);
+
+// a catch: a ring that opens and fades where the fish was taken
+const ripples = [];
+const rippleGeo = new THREE.RingGeometry(0.86, 1, 48);
+for (let i = 0; i < 16; i++){
+  const m = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+  m.visible = false; scene.add(m); ripples.push(m);
+}
+
+function applyTheme(){
+  readTheme();
+  const c = s => new THREE.Color(s);
+  scene.background = c(T.water);
+  scene.fog.color = c(T.water);
+  tank.material.color = c(T.edge);
+  floor.material.color = c(T.edge);
+  sharkMat.color = c(T.shark);
+  scentMat.uniforms.uColor.value = c(T.scent);
+  scentMat.uniforms.uAmp.value = T.scentA;
+  capMat.color = c(T.ink); rimMat.color = c(T.soft);
+  noseMat.color = c(T.neg);
+  aimRing.material.color = c(T.pos); aimMat.color = aimRing.material.color;
+  ripples.forEach(m => m.material.color = c(T.alarm));
+  hemi.groundColor = c(T.bg);
+  T.cFish = c(T.fish); T.cAlarm = c(T.alarm);
+}
+applyTheme();
 if (window.matchMedia){
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
-  if (mq.addEventListener) mq.addEventListener('change', () => { readTheme(); drawCurve(); drawTraits(); });
+  if (mq.addEventListener) mq.addEventListener('change', () => { applyTheme(); drawCurve(); drawTraits(); });
 }
 
-/* ---------- showcase ---------- */
-const water = document.getElementById('water');
-const wctx = water.getContext('2d');
-const show = new World(1400, 900, 170);
-show.usePool = true;
-const showHid = new Float32Array(N_HID);   // the displayed shark's own hidden state
-let VW = 1000, VH = 660;
+/* ---------- camera: orbit the tank, follow the shark, or ride along behind it ---------- */
+let camMode = 'orbit', recenter = false;
+const origin = new THREE.Vector3(), lookAt = new THREE.Vector3();
+const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3();
+if (renderer){
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  view.appendChild(renderer.domElement);
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.minDistance = 90; controls.maxDistance = 3000;
+  controls.autoRotate = true; controls.autoRotateSpeed = 0.35;     // until someone takes the wheel
+  controls.addEventListener('start', () => { controls.autoRotate = false; recenter = false; });
+  if (matchMedia('(pointer: coarse)').matches) el('cam-hint').textContent = 'Drag to turn the tank · pinch to zoom · two fingers to pan';
+}
+function setCam(mode){
+  const prev = camMode;
+  camMode = mode;
+  document.querySelectorAll('[data-cam]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.cam === mode)));
+  if (!controls) return;
+  controls.enabled = mode !== 'ride';
+  if (mode === 'ride') lookAt.copy(controls.target);
+  else if (prev === 'ride') controls.target.copy(lookAt);
+  recenter = mode === 'orbit';       // ease back to the middle of the tank, once
+}
+document.querySelectorAll('[data-cam]').forEach(b => b.addEventListener('click', () => setCam(b.dataset.cam)));
 
-const plume = document.createElement('canvas');
-const pctx = plume.getContext('2d');
-let plumeData = null;
-
-function syncPlume(){
-  const f = show.scent;
-  if (plume.width !== f.cols || plume.height !== f.rows){
-    plume.width = f.cols; plume.height = f.rows;
-    plumeData = pctx.createImageData(f.cols, f.rows);
+function updateCamera(){
+  if (!controls) return;
+  const s = toWorld(show.sx, show.sy, show.sz, tmp);
+  if (camMode === 'ride'){
+    // sit behind and a little above the shark, looking where it is going
+    camera.position.lerp(tmp2.set(s.x - show.fx * 150, s.y - show.fy * 150 + 46, s.z - show.fz * 150), 0.08);
+    lookAt.lerp(tmp3.set(s.x + show.fx * 140, s.y + show.fy * 140, s.z + show.fz * 140), 0.12);
+    camera.lookAt(lookAt);
+  } else {
+    if (camMode === 'follow'){
+      tmp2.copy(s).sub(controls.target).multiplyScalar(0.12);
+      controls.target.add(tmp2); camera.position.add(tmp2);
+    } else if (recenter){
+      controls.target.lerp(origin, 0.08);
+      if (controls.target.lengthSq() < 1) recenter = false;
+    }
+    controls.update();
   }
-}
-function paintPlume(){
-  const f = show.scent, d = plumeData.data, [r, g, b] = T.scentRgb;
-  const amp = T.scentA * 255;
-  for (let i = 0; i < f.a.length; i++){
-    const v = f.a[i];
-    const a = v <= 0 ? 0 : Math.min(1, Math.sqrt(v / 140)) * amp;
-    const o = i * 4;
-    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = a;
-  }
-  pctx.putImageData(plumeData, 0, 0);
+  // fog scales with the view, so depth reads at any zoom
+  const dist = camera.position.distanceTo(camMode === 'ride' ? lookAt : controls.target);
+  scene.fog.near = dist * 0.55; scene.fog.far = dist * 2.6 + 400;
 }
 
-function sizeWater(){
-  const r = water.parentElement.getBoundingClientRect();
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  water.width = Math.max(1, Math.round(r.width * dpr));
-  water.height = Math.max(1, Math.round(r.height * dpr));
-  VW = 1400;
-  VH = Math.max(600, Math.min(2100, Math.round(1400 * (r.height / Math.max(1, r.width)))));
-  show.resize(VW, VH);
-  syncPlume();
-  const scale = water.width / VW;
-  wctx.setTransform(scale, 0, 0, scale, 0, 0);
-  wctx.fillStyle = T.water;
-  wctx.fillRect(0, 0, VW, VH);
+function resize(){
+  const r = view.getBoundingClientRect();
+  if (!renderer || !r.width || !r.height) return;
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height;
+  camera.updateProjectionMatrix();
+  scentMat.uniforms.uScale.value = r.height * renderer.getPixelRatio() / (2 * Math.tan(camera.fov * Math.PI / 360));
 }
+new ResizeObserver(resize).observe(view);
 
-function fishPath(ctx){
-  ctx.beginPath();
-  ctx.moveTo(5.6, 0);
-  ctx.lineTo(-2.4, 2.3);
-  ctx.lineTo(-0.9, 0);
-  ctx.lineTo(-2.4, -2.3);
-  ctx.closePath();
-}
-
-function drawShark(ctx, x, y, a){
-  ctx.save();
-  ctx.translate(x, y); ctx.rotate(a);
-  ctx.beginPath();
-  ctx.moveTo(23, 0);
-  ctx.bezierCurveTo(14, 5.5, 2, 7.4, -11, 4.6);
-  ctx.lineTo(-19, 10.5);
-  ctx.lineTo(-15.5, 0);
-  ctx.lineTo(-19, -10.5);
-  ctx.lineTo(-11, -4.6);
-  ctx.bezierCurveTo(2, -7.4, 14, -5.5, 23, 0);
-  ctx.closePath();
-  ctx.fillStyle = T.shark; ctx.fill();
-  ctx.lineWidth = 0.7; ctx.strokeStyle = T['shark-edge']; ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(2, -5.6); ctx.lineTo(-3.5, -13.5); ctx.lineTo(-7.5, -5.2); ctx.closePath();
-  ctx.moveTo(6, 4.4); ctx.lineTo(-2, 12); ctx.lineTo(-1, 4.2); ctx.closePath();
-  ctx.fillStyle = T.shark; ctx.fill(); ctx.stroke();
-  ctx.restore();
-}
-
-let showSense = false, showScent = false;
-
-function drawSenseOverlay(ctx){
-  ctx.save();
-  // the cone it can actually see
-  ctx.beginPath();
-  ctx.moveTo(show.sx, show.sy);
-  ctx.arc(show.sx, show.sy, VISION, show.head - 1.309, show.head + 1.309);
-  ctx.closePath();
-  ctx.fillStyle = T.ink; ctx.globalAlpha = 0.045; ctx.fill();
-  ctx.globalAlpha = 0.5; ctx.lineWidth = 0.7; ctx.strokeStyle = T.faint; ctx.stroke();
-  ctx.globalAlpha = 1;
-  if (show.target){
-    ctx.strokeStyle = T.pos; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(show.sx, show.sy); ctx.lineTo(show.target.x, show.target.y); ctx.stroke();
-    ctx.beginPath(); ctx.arc(show.target.x, show.target.y, 6, 0, 6.283); ctx.stroke();
-  }
-  // the nostrils
-  const cos = Math.cos(show.head), sin = Math.sin(show.head);
-  const nx = show.sx + cos * 18, ny = show.sy + sin * 18;
-  ctx.fillStyle = T.neg;
-  for (const sgn of [1, -1]){
-    ctx.beginPath();
-    ctx.arc(nx - sin * 9 * sgn, ny + cos * 9 * sgn, 2.2, 0, 6.283);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function renderWater(frame){
-  const ctx = wctx;
-  ctx.globalAlpha = 0.34;
-  ctx.fillStyle = T.water;
-  ctx.fillRect(0, 0, VW, VH);
-  ctx.globalAlpha = 1;
-
-  if (showScent){
-    if (frame % 2 === 0) paintPlume();
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(plume, 0, 0, VW, VH);
-  }
-
-  ctx.strokeStyle = T.hair; ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, VW - 1, VH - 1);
-
+/* ---------- drawing the water ---------- */
+let showScent = false, showSense = false;
+const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+const zAxis = new THREE.Vector3(0, 0, 1), dir = new THREE.Vector3(), col = new THREE.Color();
+function drawWater(frame){
   for (let i = 0; i < show.fish.length; i++){
     const f = show.fish[i];
-    ctx.save();
-    ctx.translate(f.x, f.y); ctx.rotate(f.ang);
-    fishPath(ctx);
-    if (f.flee > 0.12){
-      ctx.fillStyle = T.alarm;
-      ctx.globalAlpha = 0.45 + 0.55 * Math.min(1, f.flee);
-    } else {
-      ctx.fillStyle = T.fish;
-      ctx.globalAlpha = 0.82;
-    }
-    ctx.fill();
-    ctx.restore();
+    toWorld(f.x, f.y, f.z, pos);
+    dir.set(f.vx, f.vy, f.vz).normalize();
+    q.setFromUnitVectors(zAxis, dir);
+    mtx.compose(pos, q, one.setScalar(1.5));
+    fishMesh.setMatrixAt(i, mtx);
+    col.copy(T.cFish).lerp(T.cAlarm, f.flee > 0.12 ? Math.min(1, 0.45 + 0.55 * f.flee) : 0);
+    fishMesh.setColorAt(i, col);
   }
-  ctx.globalAlpha = 1;
+  fishMesh.instanceMatrix.needsUpdate = true;
+  fishMesh.instanceColor.needsUpdate = true;
 
-  if (showSense) drawSenseOverlay(ctx);
-  drawShark(ctx, show.sx, show.sy, show.head);
+  toWorld(show.sx, show.sy, show.sz, shark.position);
+  shark.lookAt(tmp.set(shark.position.x + show.fx, shark.position.y + show.fy, shark.position.z + show.fz));
 
+  scentPts.visible = showScent;
+  if (showScent && frame % 2 === 0){
+    const a = show.scent.a;
+    for (let i = 0; i < cells; i++){ const v = a[i]; scentV[i] = v <= 0 ? 0 : Math.min(1, Math.sqrt(v / 420)); }
+    scentGeo.attributes.v.needsUpdate = true;
+  }
+
+  senseG.visible = showSense;
+  const tgt = showSense && show.target;
+  aimLine.visible = aimRing.visible = !!tgt;
+  if (showSense){
+    senseG.position.copy(shark.position); senseG.quaternion.copy(shark.quaternion);
+    if (tgt){
+      const p = aimLine.geometry.attributes.position;
+      p.setXYZ(0, shark.position.x, shark.position.y, shark.position.z);
+      toWorld(tgt.x, tgt.y, tgt.z, pos);
+      p.setXYZ(1, pos.x, pos.y, pos.z); p.needsUpdate = true;
+      aimRing.position.copy(pos); aimRing.quaternion.copy(camera.quaternion);
+    }
+  }
+
+  let r = 0;
   for (let i = show.events.length - 1; i >= 0; i--){
     const e = show.events[i];
     e.t += 1;
-    const p = e.t / 26;
+    const p = e.t / 30;
     if (p >= 1){ show.events.splice(i, 1); continue; }
-    ctx.strokeStyle = T.alarm;
-    ctx.globalAlpha = (1 - p) * 0.8;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.arc(e.x, e.y, 4 + p * 26, 0, 6.283); ctx.stroke();
+    if (r >= ripples.length) continue;
+    const m = ripples[r++];
+    m.visible = true;
+    toWorld(e.x, e.y, e.z, m.position);
+    m.scale.setScalar(5 + p * 34);
+    m.quaternion.copy(camera.quaternion);
+    m.material.opacity = (1 - p) * 0.9;
   }
-  ctx.globalAlpha = 1;
+  for (; r < ripples.length; r++) ripples[r].visible = false;
 }
 
 /* ---------- brain diagram ---------- */
-const brain = document.getElementById('brain');
+const brain = el('brain');
 const bctx = brain.getContext('2d');
-let BW = 320, BH = 300, nodeIn = [], nodeHid = [], nodeOut = null;
+let BW = 320, BH = 360, nodeIn = [], nodeHid = [], nodeOut = [];
 
 function sizeBrain(){
   BW = Math.max(240, brain.parentElement.clientWidth - 48);
-  BH = Math.round(BW * 0.92);
+  BH = Math.round(BW * 1.12);
   const d = Math.min(2, window.devicePixelRatio || 1);
   brain.width = Math.round(BW * d); brain.height = Math.round(BH * d);
   brain.style.height = BH + 'px';
   bctx.setTransform(d, 0, 0, d, 0, 0);
-  const lx = 92, rx = BW - 24, mx = (lx + rx) / 2 + 10;
-  const top = 12, bot = BH - 14;
+  const lx = 86, rx = BW - 30, mx = (lx + rx) / 2 + 4;
+  const top = 10, bot = BH - 12;
   nodeIn = SENSES.map((s, i) => ({ x: lx, y: top + (bot - top) * i / (N_IN - 1), s }));
-  nodeHid = Array.from({ length: N_HID }, (_, j) => ({
-    x: mx, y: top + 26 + (bot - top - 52) * j / (N_HID - 1)
-  }));
-  nodeOut = { x: rx, y: (top + bot) / 2 };
+  nodeHid = Array.from({ length: N_HID }, (_, j) => ({ x: mx, y: top + 22 + (bot - top - 44) * j / (N_HID - 1) }));
+  nodeOut = OUTPUTS.map((label, k) => ({ x: rx, y: (top + bot) / 2 + (k ? 1 : -1) * (bot - top) * 0.13, label }));
 }
 
 function drawBrain(){
   const ctx = bctx;
   ctx.clearRect(0, 0, BW, BH);
-  const g = Trainer.best, mask = Trainer.mask, sense = show.sense;
+  const g = Trainer.best, mask = Trainer.mask, sense = show.sense, h = show.mem;
 
   for (let j = 0; j < N_HID; j++){
     for (let i = 0; i < N_IN; i++){
@@ -1087,22 +1352,24 @@ function drawBrain(){
       ctx.beginPath();
       ctx.moveTo(nodeIn[i].x + 5, nodeIn[i].y);
       ctx.lineTo(nodeHid[j].x - 5, nodeHid[j].y);
-      ctx.lineWidth = 0.25 + mag * 1.25;
+      ctx.lineWidth = 0.25 + mag * 1.15;
       ctx.strokeStyle = live ? (w > 0 ? T.pos : T.neg) : T.hair;
-      ctx.globalAlpha = live ? 0.12 + mag * 0.5 * (0.35 + 0.65 * Math.min(1, Math.abs(sense[i]))) : 0.26;
+      ctx.globalAlpha = live ? 0.1 + mag * 0.5 * (0.35 + 0.65 * Math.min(1, Math.abs(sense[i]))) : 0.26;
       ctx.stroke();
     }
   }
-  for (let j = 0; j < N_HID; j++){
-    const w = g[W_OUT + j];
-    const mag = Math.min(1, Math.abs(w) / 1.8);
-    ctx.beginPath();
-    ctx.moveTo(nodeHid[j].x + 5, nodeHid[j].y);
-    ctx.lineTo(nodeOut.x - 6, nodeOut.y);
-    ctx.lineWidth = 0.3 + mag * 1.6;
-    ctx.strokeStyle = w > 0 ? T.pos : T.neg;
-    ctx.globalAlpha = 0.2 + mag * 0.6 * (0.4 + 0.6 * Math.abs(showHid[j]));
-    ctx.stroke();
+  for (let k = 0; k < N_OUT; k++){
+    for (let j = 0; j < N_HID; j++){
+      const w = g[W_OUT + k * N_HID + j];
+      const mag = Math.min(1, Math.abs(w) / 1.8);
+      ctx.beginPath();
+      ctx.moveTo(nodeHid[j].x + 5, nodeHid[j].y);
+      ctx.lineTo(nodeOut[k].x - 7, nodeOut[k].y);
+      ctx.lineWidth = 0.3 + mag * 1.5;
+      ctx.strokeStyle = w > 0 ? T.pos : T.neg;
+      ctx.globalAlpha = 0.18 + mag * 0.6 * (0.4 + 0.6 * Math.abs(h[j]));
+      ctx.stroke();
+    }
   }
   ctx.globalAlpha = 1;
 
@@ -1114,7 +1381,7 @@ function drawBrain(){
     ctx.globalAlpha = live ? 1 : 0.55;
     ctx.fillText(n.s.label, n.x - 11, n.y);
     ctx.globalAlpha = 1;
-    ctx.beginPath(); ctx.arc(n.x, n.y, 4.4, 0, 6.283);
+    ctx.beginPath(); ctx.arc(n.x, n.y, 4.2, 0, 6.283);
     ctx.fillStyle = v >= 0 ? T.pos : T.neg;
     ctx.globalAlpha = live ? Math.min(1, Math.abs(v)) * 0.95 : 0;
     ctx.fill();
@@ -1122,7 +1389,7 @@ function drawBrain(){
     ctx.lineWidth = 0.9; ctx.strokeStyle = live ? T.soft : T.hair; ctx.stroke();
   }
   for (let j = 0; j < N_HID; j++){
-    const n = nodeHid[j], v = showHid[j];
+    const n = nodeHid[j], v = h[j];
     ctx.beginPath(); ctx.arc(n.x, n.y, 4.8, 0, 6.283);
     ctx.fillStyle = v >= 0 ? T.pos : T.neg;
     ctx.globalAlpha = Math.min(1, Math.abs(v)) * 0.9; ctx.fill();
@@ -1133,8 +1400,8 @@ function drawBrain(){
   {
     const on = Trainer.stage >= 8;
     let mag = 0;
-    if (on){ for (let k = 0; k < N_HID; k++) mag += Math.abs(g[W_REC + k]); mag /= N_HID; }
-    let act = 0; for (let j = 0; j < N_HID; j++) act += Math.abs(showHid[j]); act /= N_HID;
+    if (on){ for (let k = 0; k < N_HID; k++) mag += Math.max(0, Math.min(0.9, g[W_REC + k])); mag /= N_HID; }
+    let act = 0; for (let j = 0; j < N_HID; j++) act += Math.abs(h[j]); act /= N_HID;
     const bx = nodeHid[0].x + 16, y0 = nodeHid[0].y, y1 = nodeHid[N_HID - 1].y;
     ctx.strokeStyle = on ? T.pos : T.hair;
     ctx.globalAlpha = on ? 0.25 + Math.min(1, mag / 0.6) * 0.55 * (0.4 + 0.6 * act) : 0.4;
@@ -1143,7 +1410,7 @@ function drawBrain(){
     ctx.moveTo(nodeHid[N_HID - 1].x + 5, y1);
     ctx.lineTo(bx, y1); ctx.lineTo(bx, y0); ctx.lineTo(nodeHid[0].x + 7, y0);
     ctx.stroke();
-    ctx.beginPath();                                   // arrow back into the column
+    ctx.beginPath();
     ctx.moveTo(nodeHid[0].x + 5.5, y0);
     ctx.lineTo(nodeHid[0].x + 10, y0 - 2.6);
     ctx.lineTo(nodeHid[0].x + 10, y0 + 2.6);
@@ -1156,19 +1423,20 @@ function drawBrain(){
     ctx.fillText('memory', 0, 0);
     ctx.restore();
   }
-
-  const o = show.turn || 0;
-  ctx.beginPath(); ctx.arc(nodeOut.x, nodeOut.y, 7.5, 0, 6.283);
-  ctx.fillStyle = o >= 0 ? T.pos : T.neg;
-  ctx.globalAlpha = Math.min(1, Math.abs(o)); ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.lineWidth = 1; ctx.strokeStyle = T.ink; ctx.stroke();
-  ctx.textAlign = 'center'; ctx.fillStyle = T.soft;
-  ctx.fillText('turn', nodeOut.x, nodeOut.y + 20);
+  for (let k = 0; k < N_OUT; k++){
+    const n = nodeOut[k], o = show.out[k];
+    ctx.beginPath(); ctx.arc(n.x, n.y, 7.5, 0, 6.283);
+    ctx.fillStyle = o >= 0 ? T.pos : T.neg;
+    ctx.globalAlpha = Math.min(1, Math.abs(o)); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1; ctx.strokeStyle = T.ink; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillStyle = T.soft;
+    ctx.fillText(n.label, n.x, n.y + 19);
+  }
 }
 
 /* ---------- fitness curve ---------- */
-const curve = document.getElementById('curve');
+const curve = el('curve');
 const cctx = curve.getContext('2d');
 function drawCurve(){
   const w = Math.max(80, curve.parentElement.clientWidth - 48), h = 64;
@@ -1180,7 +1448,7 @@ function drawCurve(){
   cctx.setTransform(d, 0, 0, d, 0, 0);
   cctx.clearRect(0, 0, w, h);
   const hist = Trainer.history;
-  document.getElementById('c-max').textContent = Trainer.bestEaten;
+  el('c-max').textContent = Trainer.bestEaten;
   if (hist.length < 2) return;
   let max = 3;
   for (const p of hist) if (p.b > max) max = p.b;
@@ -1204,7 +1472,7 @@ function drawCurve(){
 }
 
 /* ---------- trait chart ---------- */
-const traitsC = document.getElementById('traits');
+const traitsC = el('traits');
 const tctx = traitsC.getContext('2d');
 function drawTraits(){
   const w = Math.max(200, traitsC.parentElement.clientWidth - 48);
@@ -1224,20 +1492,16 @@ function drawTraits(){
     const t = TRAITS[i], st = stats[i], y = 14 + i * rowH;
     tctx.textAlign = 'left'; tctx.fillStyle = T.soft;
     tctx.fillText(t.label, 0, y);
-    // the track
     tctx.strokeStyle = T['hair-soft']; tctx.lineWidth = 1;
     tctx.beginPath(); tctx.moveTo(x0, y + 0.5); tctx.lineTo(x1, y + 0.5); tctx.stroke();
-    // where it started
     const sx = x0 + (x1 - x0) * PREY_START[i];
     tctx.strokeStyle = T.faint;
     tctx.beginPath(); tctx.moveTo(sx, y - 4); tctx.lineTo(sx, y + 4); tctx.stroke();
-    // the spread it currently has
     const a = x0 + (x1 - x0) * Math.max(0, st.mean - st.sd);
     const b = x0 + (x1 - x0) * Math.min(1, st.mean + st.sd);
     tctx.strokeStyle = T.neg; tctx.globalAlpha = 0.45; tctx.lineWidth = 2.5;
     tctx.beginPath(); tctx.moveTo(a, y + 0.5); tctx.lineTo(b, y + 0.5); tctx.stroke();
     tctx.globalAlpha = 1;
-    // where it is now
     const mx = x0 + (x1 - x0) * st.mean;
     const drifted = Math.abs(st.mean - PREY_START[i]) > 0.06;
     tctx.beginPath(); tctx.arc(mx, y + 0.5, 3, 0, 6.283);
@@ -1249,7 +1513,6 @@ function drawTraits(){
 }
 
 /* ---------- panel ---------- */
-const el = id => document.getElementById(id);
 const stagesBar = el('stages');
 for (let i = 0; i < LAST_STAGE; i++) stagesBar.appendChild(document.createElement('i'));
 
@@ -1281,9 +1544,9 @@ function updatePanel(){
   } else {
     const a = Trainer.sumWith / Trainer.trials, b = Trainer.sumWithout / Trainer.trials;
     const diff = a - b;
-    el('v-delta').firstChild.nodeValue = (diff >= 0 ? '+' : '\u2212') + Math.abs(diff).toFixed(1) + ' fish';
+    el('v-delta').firstChild.nodeValue = (diff >= 0 ? '+' : '−') + Math.abs(diff).toFixed(1) + ' fish';
     el('v-sub').textContent = b > 0.2
-      ? 'the nose is worth ' + (a / b).toFixed(1) + '\u00d7 the catch'
+      ? 'the nose is worth ' + (a / b).toFixed(1) + '× the catch'
       : 'blocked, it catches almost nothing';
     el('s-with').textContent = a.toFixed(1) + ' fish, last ' + Trainer.probeWith;
     el('s-without').textContent = b.toFixed(1) + ' fish, last ' + Trainer.probeWithout;
@@ -1299,94 +1562,14 @@ function updatePanel(){
 }
 
 /* ---------- saving and restoring a brain ---------- */
-const r5 = x => Math.round(x * 1e5) / 1e5;
-
-function brainJSON(){
-  return JSON.stringify({
-    format: 'pelagic-brain',
-    version: 1,
-    saved: new Date().toISOString(),
-    network: {
-      inputs: N_IN, hidden: N_HID, outputs: N_OUT,
-      activation: 'tanh',
-      recurrence: 'one leak per hidden unit, clamped to [0, 0.9]; h(t) = tanh(Wx + leak*h(t-1))',
-      senses: SENSES.map(x => x.label),
-      active: SENSES.map((x, i) => Trainer.mask[i] ? 1 : 0),
-      memoryOn: Trainer.stage >= 8,
-      output: 'turn, in [-1, 1]',
-      layout: [
-        'w_in: ' + (N_IN * N_HID) + ' values, hidden-major (unit j occupies [j*' + N_IN + ' .. j*' + N_IN + '+' + (N_IN - 1) + '])',
-        'w_rec: ' + N_HID + ' values, one per hidden unit',
-        'w_out: ' + N_HID + ' values',
-        'b_out: 1 value'
-      ]
-    },
-    world: {
-      arena: [1400, 900], vision: VISION, fieldOfViewDegrees: 150,
-      sharkSpeed: SHARK_SPEED, turnRate: SHARK_TURN, catchRadius: CATCH,
-      scent: { cell: SCELL, decayPerUpdate: SCENT_DECAY, updateEveryTicks: SCENT_EVERY,
-               floor: SCENT_FLOOR, scale: SCENT_SCALE }
-    },
-    training: {
-      generation: Trainer.gen, stage: Trainer.stage, stagesTotal: LAST_STAGE,
-      bestSingleHunt: Trainer.bestEaten,
-      noseTrials: Trainer.trials,
-      noseWorking: Trainer.trials ? r5(Trainer.sumWith / Trainer.trials) : null,
-      nostrilsBlocked: Trainer.trials ? r5(Trainer.sumWithout / Trainer.trials) : null,
-      memoryTrials: Trainer.memTrials,
-      memoryWorking: Trainer.memTrials ? r5(Trainer.sumMemOn / Trainer.memTrials) : null,
-      memoryBlocked: Trainer.memTrials ? r5(Trainer.sumNoMem / Trainer.memTrials) : null
-    },
-    weights: Array.from(Trainer.best, r5),
-    prey: {
-      traits: TRAITS.map(t => ({ name: t.label, min: t.lo, max: t.hi })),
-      note: 'each pool entry is one fish genome, values in [0,1], decoded linearly into the ranges above',
-      pool: Trainer.pool.map(g => Array.from(g, r5))
-    }
-  });
-}
-
 function say(msg){ el('io-status').textContent = msg; }
 
 function applyBrain(text){
   let d;
   try { d = JSON.parse(text); }
   catch (e){ say('That is not readable JSON.'); return false; }
-  if (!d || d.format !== 'pelagic-brain'){ say('That file is not a saved brain.'); return false; }
-  const net = d.network || {};
-  if (net.inputs !== N_IN || net.hidden !== N_HID){
-    say('Those weights are for a ' + net.inputs + '\u2013' + net.hidden + ' network; this one is ' + N_IN + '\u2013' + N_HID + '.');
-    return false;
-  }
-  if (!Array.isArray(d.weights) || d.weights.length !== GENOME){
-    say('Expected ' + GENOME + ' weights, found ' + (d.weights ? d.weights.length : 0) + '.');
-    return false;
-  }
-  Trainer.best = Float32Array.from(d.weights);
-  const t = d.training || {};
-  Trainer.stage = Math.min(LAST_STAGE, Math.max(1, t.stage || LAST_STAGE));
-  Trainer.mask = maskFor(Trainer.stage);
-  Trainer.noNose = maskMinusScent(Trainer.mask);
-  Trainer.gen = t.generation || 0;
-  Trainer.bestEaten = t.bestSingleHunt || 0;
-  // the loaded brain becomes the elite; the rest of the population are its variants
-  const rnd = Trainer.rnd;
-  Trainer.pop = [Trainer.best.slice()];
-  while (Trainer.pop.length < POP){
-    const c = Trainer.best.slice();
-    for (let k = 0; k < GENOME; k++) if (rnd() < 0.14) c[k] += gauss(rnd) * 0.2;
-    Trainer.pop.push(c);
-  }
-  if (d.prey && Array.isArray(d.prey.pool) && d.prey.pool.length &&
-      d.prey.pool[0].length === PREY_GENES){
-    Trainer.pool = d.prey.pool.map(g => Float32Array.from(g));
-  }
-  Trainer.history = []; Trainer.stageGens = 0; Trainer.fresh = null; Trainer.freshAge = 99;
-  Trainer.phase = 'eval'; Trainer.i = 0; Trainer.pi = 0;
-  Trainer.trials = 0; Trainer.sumWith = 0; Trainer.sumWithout = 0;
-  Trainer.memTrials = 0; Trainer.sumMemOn = 0; Trainer.sumNoMem = 0;
-  Trainer.recordEaten = null; Trainer.recordCond = null;
-  Trainer.beginIndividual();
+  const err = applyBrainData(d);
+  if (err){ say(err); return false; }
   show.reset(mulberry32(Math.floor(Math.random() * 1e9)), Trainer.pool);
   lastGen = -1; drawCurve(); drawTraits(); updatePanel();
   say('Loaded. Generation ' + Trainer.gen + ', stage ' + Trainer.stage + '. Training continues from here.');
@@ -1427,8 +1610,11 @@ function tick(now){
   if (!paused){
     const steps = fast ? 3 : 1;
     for (let k = 0; k < steps; k++) show.step(Trainer.best, Trainer.mask, true, Trainer.stage >= 8);
-    showHid.set(hid);   // grab it before the trainer overwrites the shared buffer
-    renderWater(frame);
+  }
+  if (renderer){
+    drawWater(frame);
+    updateCamera();
+    renderer.render(scene, camera);
   }
   Trainer.work(paused ? 26 : budget);
 
@@ -1440,17 +1626,10 @@ function tick(now){
 }
 
 /* ---------- wiring ---------- */
-function boot(){
-  Trainer.init(20260920);
-  sizeWater(); sizeBrain(); drawCurve(); drawTraits(); updatePanel();
-  show.reset(mulberry32(7), Trainer.pool);
-  requestAnimationFrame(tick);
-}
-
 let rt;
 window.addEventListener('resize', () => {
   clearTimeout(rt);
-  rt = setTimeout(() => { sizeWater(); sizeBrain(); drawCurve(); drawTraits(); }, 120);
+  rt = setTimeout(() => { sizeBrain(); drawCurve(); drawTraits(); }, 120);
 });
 
 el('b-pause').addEventListener('click', e => {
@@ -1461,7 +1640,7 @@ el('b-pause').addEventListener('click', e => {
 el('b-fast').addEventListener('click', e => {
   fast = !fast;
   e.currentTarget.setAttribute('aria-pressed', String(fast));
-  e.currentTarget.textContent = fast ? 'Back to \u00d71' : 'Run at \u00d73';
+  e.currentTarget.textContent = fast ? 'Back to ×1' : 'Run at ×3';
 });
 el('b-scent').addEventListener('click', e => {
   showScent = !showScent;
@@ -1490,8 +1669,7 @@ el('b-theme').addEventListener('click', e => {
   const dark = document.documentElement.getAttribute('data-theme') !== 'light';
   document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
   e.currentTarget.textContent = dark ? 'Return to depth' : 'Print on paper';
-  readTheme();
-  wctx.fillStyle = T.water; wctx.fillRect(0, 0, VW, VH);
+  applyTheme();
   drawCurve(); drawTraits();
 });
 el('b-save').addEventListener('click', async () => {
@@ -1512,8 +1690,8 @@ el('b-save').addEventListener('click', async () => {
   showIO(text, 'Downloads are not available here. Copy this and keep it in a file.');
 });
 el('b-demo').addEventListener('click', () => {
-  // the 150-generation champion from demo-brain.json, bundled so it works offline too
-  if (applyBrain(el('demo-brain').textContent)) say('Loaded a 150-generation hunter. Training continues from here.');
+  // the trained champion from demo-brain.json, bundled so it works offline too
+  if (applyBrain(el('demo-brain').textContent)) say('Loaded a ' + Trainer.gen + '-generation hunter. Training continues from here.');
 });
 el('b-load').addEventListener('click', () => {
   showIO('', 'Paste a saved brain here, then load it.');
@@ -1532,7 +1710,8 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Space' && e.target === document.body){ e.preventDefault(); el('b-pause').click(); }
 });
 
-boot();
+sizeBrain(); drawCurve(); drawTraits(); updatePanel(); resize();
+requestAnimationFrame(tick);
 </script>
 </body>
 </html>
