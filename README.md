@@ -42,7 +42,10 @@ The original flat version is kept at the git tag `2d`.
 **The tank (left).** A 3D volume: bone-coloured fish, a shark, and the cloud
 of scent the school leaves behind it. Fish turn rust-coloured when they
 bolt. Both beat their tails gently, faster when a fish bolts or the shark is
-chasing. It slowly turns on its own until you grab it.
+chasing. The water is lighter towards the surface and darker in the deep,
+with faint drifting particles and soft light moving on the floor; with
+reduced motion turned on in your system, those stay still. It slowly turns
+on its own until you grab it.
 
 **The shark's brain (right, top).** A live 19–12–2 network:
 
