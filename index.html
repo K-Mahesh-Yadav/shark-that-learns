@@ -1161,19 +1161,20 @@ const ambient = { value: 0 };                 // seconds of ambient motion, stop
 const backdrop = new THREE.Mesh(new THREE.SphereGeometry(4000, 32, 16), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false,
   uniforms: { uTop: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uLow: { value: new THREE.Color() } },
+  // the gradient is worked out per vertex and blended across the sphere: the same look,
+  // without a per-pixel cost on a surface that fills the whole screen
   vertexShader: `
-    varying vec3 vDir;
+    uniform vec3 uTop, uMid, uLow; varying vec3 vColor;
     void main(){
       vec4 w = modelMatrix * vec4(position, 1.0);
-      vDir = normalize(w.xyz - cameraPosition);
+      float y = normalize(w.xyz - cameraPosition).y;
+      vColor = y > 0.0 ? mix(uMid, uTop, smoothstep(0.0, 0.85, y)) : mix(uMid, uLow, smoothstep(0.0, 0.7, -y));
       gl_Position = projectionMatrix * viewMatrix * w;
     }`,
   fragmentShader: `
-    uniform vec3 uTop, uMid, uLow; varying vec3 vDir;
+    varying vec3 vColor;
     void main(){
-      float y = vDir.y;
-      vec3 c = y > 0.0 ? mix(uMid, uTop, smoothstep(0.0, 0.85, y)) : mix(uMid, uLow, smoothstep(0.0, 0.7, -y));
-      gl_FragColor = vec4(c, 1.0);
+      gl_FragColor = vec4(vColor, 1.0);
       #include <colorspace_fragment>
     }`
 }));
