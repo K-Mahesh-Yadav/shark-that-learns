@@ -55,6 +55,11 @@ bolt. It slowly turns on its own until you grab it.
   exist but are multiplied by zero.
 - The spine beside the hidden column is memory, lit once stage 8 arrives.
 
+Point at any sense, or at turn or climb (tap on a phone), and the tank draws
+what it means: the fish it is tracking, the ray to the wall, the centre of the
+shoal, the nostrils being compared, or the direction it is steering, with the
+live value and a plain-English caption.
+
 It redraws every second frame, so it samples the state rather than showing
 every tick. Connections below |w| = 0.13 are not drawn, for legibility.
 

@@ -73,6 +73,17 @@
     display:flex; gap:26px; color:var(--soft); font-size:12px;
   }
   .readout b{display:block; color:var(--ink); font-size:20px; font-weight:400; line-height:1.15;}
+  .probe{
+    position:absolute; right:24px; bottom:24px; z-index:2; width:300px; padding:12px 14px;
+    background:color-mix(in srgb, var(--bg) 84%, transparent); border:1px solid var(--hair);
+    font-size:12px; line-height:1.45; color:var(--soft); pointer-events:none;
+  }
+  .probe[hidden]{display:none}
+  .probe-head{display:flex; justify-content:space-between; align-items:baseline; gap:12px;}
+  .probe-head b{color:var(--ink); font-weight:500; font-size:13px;}
+  .probe-head span{color:var(--ink); font-size:13px;}
+  .probe p{margin:6px 0 0}
+  #brain{cursor:default}
   .nogl{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; color:var(--soft); text-align:center;}
 
   .panel{border-left:1px solid var(--hair); overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column;}
@@ -132,6 +143,7 @@
     .panel{border-left:none; border-top:1px solid var(--hair);}
     .camera{top:14px; left:14px}
     .hint{display:none}
+    .probe{left:14px; right:14px; width:auto; bottom:62px}
     .readout{left:18px; bottom:16px; gap:18px}
   }
   @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
@@ -148,6 +160,10 @@
         <button data-cam="ride" aria-pressed="false">Ride along</button>
       </div>
       <p class="hint" id="cam-hint">Drag to turn the tank · scroll to zoom · right-drag to pan</p>
+    </div>
+    <div class="probe" id="probe" hidden aria-live="polite">
+      <div class="probe-head"><b id="probe-name"></b><span id="probe-val"></span></div>
+      <p id="probe-text"></p>
     </div>
     <div class="readout">
       <div><b id="r-gen">—</b>generation</div>
@@ -166,6 +182,7 @@
         <span><i class="swatch" style="background:var(--neg)"></i>negative</span>
         <span><i class="swatch" style="background:var(--hair)"></i>not yet given</span>
       </div>
+      <p class="after" id="probe-hint">Point at a sense, or at turn or climb, to see it in the tank.</p>
       <p class="after" id="brain-hint"></p>
       <p class="after">Directions are the shark's own: "right" is where a positive turn takes it, "above" is where a positive climb takes it. Sight reaches 160 units and stops, in a 150° cone. The six wall senses carry at any distance, so a shark with nothing in view never reads a constant. The last four senses are the nose: how strong the scent is here, whether there is more of it to the right or above, and whether it is building up ahead.</p>
     </div>
@@ -674,12 +691,14 @@ class World{
       const rvx = best.vx - fx * SHARK_SPEED, rvy = best.vy - fy * SHARK_SPEED, rvz = best.vz - fz * SHARK_SPEED;
       s[5] = Math.max(-1, Math.min(1, -(rvx * ex + rvy * ey + rvz * ez) / 5));
       mx /= seen; my /= seen; mz /= seen;
+      this.shoal = [mx, my, mz];
       const gx = mx - this.sx, gy = my - this.sy, gz = mz - this.sz, gl = Math.hypot(gx, gy, gz) || 1;
       s[12] = (gx * fx + gy * fy + gz * fz) / gl;
       s[13] = (gx * rx + gz * rz) / gl;
       s[14] = (gx * ux + gy * uy + gz * uz) / gl;
     } else {
       s[1] = s[2] = s[3] = s[4] = s[5] = s[12] = s[13] = s[14] = 0;
+      this.shoal = null;
     }
     s[6]  = this.wall( fx,  fy,  fz);
     s[7]  = this.wall(-fx, -fy, -fz);
@@ -708,11 +727,16 @@ class World{
     this.nearest = Math.sqrt(trueBest);
     return s;
   }
-  wall(dx, dy, dz){
+  // how far the shark can swim along a direction before it meets the tank
+  wallDist(dx, dy, dz){
     let t = Infinity;
     if (dx > 1e-6) t = Math.min(t, (this.w - this.sx) / dx); else if (dx < -1e-6) t = Math.min(t, -this.sx / dx);
     if (dy > 1e-6) t = Math.min(t, (this.h - this.sy) / dy); else if (dy < -1e-6) t = Math.min(t, -this.sy / dy);
     if (dz > 1e-6) t = Math.min(t, (this.d - this.sz) / dz); else if (dz < -1e-6) t = Math.min(t, -this.sz / dz);
+    return t;
+  }
+  wall(dx, dy, dz){
+    const t = this.wallDist(dx, dy, dz);
     if (!isFinite(t)) return 0;
     return 1 - Math.min(1, t / WALL_RANGE);
   }
@@ -1245,6 +1269,41 @@ for (let i = 0; i < 16; i++){
   m.visible = false; scene.add(m); ripples.push(m);
 }
 
+/* ---------- probing a sense: what one input or output means, drawn in the tank ---------- */
+const SENSE_TEXT = {
+  'bias': 'Always 1. It gives every hidden unit a resting level, so the brain does something even when nothing else changes.',
+  'how close': 'How near the closest fish it can see is: 1 touching, 0 at the edge of sight, 0 when nothing is in view.',
+  'fish ahead': 'How straight ahead that fish is: 1 dead ahead, lower as it slips to the side.',
+  'fish right': 'Where that fish is across the shark: positive to its right, negative to its left.',
+  'fish above': 'Where that fish is up and down: positive above, negative below.',
+  'closing': 'How fast the gap to that fish is shrinking. Positive means the shark is gaining.',
+  'wall ahead': 'How near the tank is in the direction it is swimming: 1 at the wall, 0 far away.',
+  'wall astern': 'How near the tank is behind it.',
+  'wall right': 'How near the tank is to its right.',
+  'wall left': 'How near the tank is to its left.',
+  'wall above': 'How near the surface or a wall is above it.',
+  'wall below': 'How near the floor or a wall is below it.',
+  'shoal ahead': 'Whether the middle of all the fish it can see lies ahead.',
+  'shoal right': 'Whether that middle lies to its right (positive) or left (negative).',
+  'shoal above': 'Whether that middle lies above (positive) or below (negative).',
+  'scent here': 'How strongly its nostrils smell fish right now.',
+  'scent right': 'Whether the right nostril smells more than the left one.',
+  'scent above': 'Whether the upper nostril smells more than the lower one.',
+  'scent ahead': 'Whether the smell is stronger at its snout than behind it: is it swimming into the scent or out of it.'
+};
+const OUT_TEXT = {
+  turn: 'How hard it is steering: positive turns right, negative turns left. Hard turns cost it speed.',
+  climb: 'How hard it is climbing: positive climbs, negative dives.'
+};
+let probe = null;           // { kind: 'in' | 'out', i }
+const probeMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.95, depthTest: false });
+const probeLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), probeMat);
+const probeDot = new THREE.Mesh(new THREE.SphereGeometry(4.5, 16, 12), new THREE.MeshBasicMaterial({ depthTest: false }));
+const probeArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 60, 0xffffff, 16, 9);
+const probeNoses = Array.from({ length: 5 }, () => new THREE.Mesh(new THREE.SphereGeometry(3.4, 12, 8), new THREE.MeshBasicMaterial({ depthTest: false })));
+[probeLine, probeDot, probeArrow, ...probeNoses].forEach(o => { o.renderOrder = 10; o.visible = false; o.frustumCulled = false; scene.add(o); });
+probeArrow.line.material.depthTest = false; probeArrow.cone.material.depthTest = false;
+
 function applyTheme(){
   readTheme();
   const c = s => new THREE.Color(s);
@@ -1260,6 +1319,8 @@ function applyTheme(){
   aimRing.material.color = c(T.pos); aimMat.color = aimRing.material.color;
   ripples.forEach(m => m.material.color = c(T.alarm));
   hemi.groundColor = c(T.bg);
+  probeMat.color = c(T.pos); probeDot.material.color = c(T.pos); probeArrow.setColor(c(T.pos));
+  probeNoses.forEach(n => n.material.color = c(T.neg));
   T.cFish = c(T.fish); T.cAlarm = c(T.alarm);
 }
 applyTheme();
@@ -1421,6 +1482,64 @@ function drawWater(frame, blend){
   for (; r < ripples.length; r++) ripples[r].visible = false;
 }
 
+function drawProbe(){
+  [probeLine, probeDot, probeArrow, ...probeNoses].forEach(o => o.visible = false);
+  const box = el('probe');
+  if (!probe){ box.hidden = true; return; }
+  box.hidden = false;
+  const o = shark.position, F = [show.fx, show.fy, show.fz], R = [show.rx, 0, show.rz], U = [show.ux, show.uy, show.uz];
+  const at = (v, len) => tmp2.set(o.x + v[0] * len, o.y + v[1] * len, o.z + v[2] * len);
+  const line = (a, b, dot) => {
+    const p = probeLine.geometry.attributes.position;
+    p.setXYZ(0, a.x, a.y, a.z); p.setXYZ(1, b.x, b.y, b.z); p.needsUpdate = true;
+    probeLine.visible = true;
+    if (dot){ probeDot.position.copy(b); probeDot.visible = true; }
+  };
+  const arrow = (v, len) => {
+    if (Math.abs(len) < 1) return;
+    probeArrow.position.copy(o);
+    probeArrow.setDirection(tmp3.set(v[0], v[1], v[2]).multiplyScalar(Math.sign(len)));
+    probeArrow.setLength(Math.abs(len), 16, 9);
+    probeArrow.visible = true;
+  };
+  let name, value, text;
+  if (probe.kind === 'out'){
+    name = OUTPUTS[probe.i]; value = show.out[probe.i]; text = OUT_TEXT[name];
+    arrow(probe.i === 0 ? R : U, value * 90);
+  } else {
+    const i = probe.i, label = SENSES[i].label, live = Trainer.mask[i] > 0;
+    name = label; value = live ? show.sense[i] : null;
+    text = SENSE_TEXT[label] + (live ? '' : ' Not given yet: it unlocks at stage ' + SENSES[i].stage + '.');
+    const axis = /ahead|astern/.test(label) ? F : /right|left/.test(label) ? R : /above|below/.test(label) ? U : null;
+    const sign = /astern|left|below/.test(label) ? -1 : 1;
+    if (/^wall/.test(label)){
+      const d = [axis[0] * sign, axis[1] * sign, axis[2] * sign];
+      const t = Math.min(show.wallDist(d[0], d[1], d[2]), WALL_RANGE);
+      line(o, toWorld(show.sx + d[0] * t, show.sy + d[1] * t, show.sz + d[2] * t, tmp), t < WALL_RANGE);
+    } else if (/^fish|^how close|^closing/.test(label)){
+      if (show.target) line(o, toWorld(show.target.x, show.target.y, show.target.z, tmp), true);
+      if (axis) arrow(axis, 60);
+    } else if (/^shoal/.test(label)){
+      if (show.shoal) line(o, toWorld(show.shoal[0], show.shoal[1], show.shoal[2], tmp), true);
+      if (axis) arrow(axis, 60);
+    } else if (/^scent/.test(label)){
+      // the four nostrils and the reference point astern, at the drawn shark's scale
+      const k = 1.8, pts = [[18, 10, 0], [18, -10, 0], [18, 0, 10], [18, 0, -10], [-34, 0, 0]];
+      const use = label === 'scent right' ? [0, 1] : label === 'scent above' ? [2, 3] : label === 'scent ahead' ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
+      use.forEach(n => {
+        const [a, b, c] = pts[n];
+        probeNoses[n].position.set(o.x + (F[0] * a + R[0] * b + U[0] * c) * k,
+                                   o.y + (F[1] * a + R[1] * b + U[1] * c) * k,
+                                   o.z + (F[2] * a + R[2] * b + U[2] * c) * k);
+        probeNoses[n].visible = true;
+      });
+    }
+  }
+  el('probe-name').textContent = name;
+  el('probe-val').textContent = value === null ? 'not given yet' : (value >= 0 ? '+' : '\u2212') + Math.abs(value).toFixed(2);
+  el('probe-text').textContent = text;
+}
+
 /* ---------- brain diagram ---------- */
 const brain = el('brain');
 const bctx = brain.getContext('2d');
@@ -1475,6 +1594,13 @@ function drawBrain(){
   }
   ctx.globalAlpha = 1;
 
+  if (probe){
+    const n = probe.kind === 'in' ? nodeIn[probe.i] : nodeOut[probe.i];
+    ctx.fillStyle = T.pos; ctx.globalAlpha = 0.14;
+    if (probe.kind === 'in') ctx.fillRect(0, n.y - 9, n.x + 10, 18);
+    else { ctx.beginPath(); ctx.arc(n.x, n.y, 15, 0, 6.283); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
   ctx.font = '10.5px "IBM Plex Sans", system-ui, sans-serif';
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   for (let i = 0; i < N_IN; i++){
@@ -1536,6 +1662,34 @@ function drawBrain(){
     ctx.fillText(n.label, n.x, n.y + 19);
   }
 }
+
+// which row of the diagram is under the pointer: a sense on the left, a decision on the right
+function probeAt(e){
+  const r = brain.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < nodeHid[0].x - 20){
+    const gap = (nodeIn[1].y - nodeIn[0].y) / 2;
+    const i = nodeIn.findIndex(n => Math.abs(n.y - y) <= gap);
+    return i < 0 ? null : { kind: 'in', i };
+  }
+  if (x > nodeHid[0].x + 30){
+    const k = nodeOut.findIndex(n => Math.hypot(n.x - x, n.y - y) < 26);
+    return k < 0 ? null : { kind: 'out', i: k };
+  }
+  return null;
+}
+const sameProbe = (a, b) => a && b && a.kind === b.kind && a.i === b.i;
+brain.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'mouse') return;
+  probe = probeAt(e);
+  brain.style.cursor = probe ? 'pointer' : 'default';
+});
+brain.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') probe = null; });
+brain.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse') return;
+  const hit = probeAt(e);
+  probe = sameProbe(hit, probe) ? null : hit;      // tap again to put it away
+});
+if (matchMedia('(pointer: coarse)').matches) el('probe-hint').textContent = 'Tap a sense, or turn or climb, to see it in the tank. Tap it again to hide it.';
 
 /* ---------- fitness curve ---------- */
 const curve = el('curve');
@@ -1727,6 +1881,7 @@ function tick(now){
   }
   if (renderer){
     drawWater(frame, paused ? 1 : clock / TICK_MS);
+    drawProbe();
     updateCamera();
     renderer.render(scene, camera);
   }
