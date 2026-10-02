@@ -73,7 +73,7 @@ where it started and a band showing the spread across the population.
 |---|---|
 | Orbit / Follow the shark / Ride along | Turn the tank yourself, keep the shark centred, or ride behind it |
 | Watch a trained shark | Loads the 250-generation brain from `demo-brain.json` in one click |
-| Pause the water | Freezes the display and gives the whole frame budget to training |
+| Pause the water | Freezes the tank; training carries on in the background |
 | Run at ×3 | Three simulation ticks per frame |
 | Show the scent | Toggles the scent cloud, off by default |
 | Show what it sees | Draws the 160-unit sight cone, the fish it has picked, and all four nostrils |
@@ -137,6 +137,9 @@ arena. The top 4 are carried forward unchanged; the rest are uniform
 crossover plus Gaussian mutation. All 24 face identical starting conditions
 within a generation, and that environment is held for three generations so
 an adaptation survives long enough for selection to notice it.
+
+Training runs in a Web Worker, a background thread, so the tank stays
+smooth while the shark learns.
 
 Senses are handed over in eight stages rather than all at once. The reason
 matters: a new sense whose weights have been drifting arrives as *noise in

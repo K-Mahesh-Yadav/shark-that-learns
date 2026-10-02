@@ -246,7 +246,7 @@
       <p>Every fish leaves scent in the water each tick. The field diffuses in all three directions and decays, so the cloud behind a school is a record of where it has just been. The shark reads it by comparing four nostrils, not by being told a direction.</p>
       <p>The brain is a 19–12–2 network with tanh units and 266 weights, twelve of which give each hidden unit a leaky connection to its own state one tick earlier — a time constant, so it can average a signal over time instead of only reacting to this instant. Until stage 8 those are held at zero. No gradients and no machine-learning library: weights are mutated and selected on how many fish each shark catches. Senses are handed over one stage at a time, because a brain given everything at once tends to learn nothing.</p>
       <p>Because both sides move, a generation's catch is not comparable with one fifty generations earlier: a later shark may be better and still eat less. The trait chart is the other half of that story.</p>
-      <p>Pausing the water gives the whole frame budget to training; the camera still moves. The 3D drawing uses three.js; everything that learns is the plain JavaScript in this file.</p>
+      <p>Training runs in a background thread, so the tank stays smooth while the shark learns; pausing the water only freezes the view. The 3D drawing uses three.js; everything that learns is the plain JavaScript in this file.</p>
     </div>
   </aside>
 </div>
@@ -1017,6 +1017,37 @@ function applyBrainData(d){
   return null;
 }
 </script>
+<script type="text/plain" id="trainer-loop">
+// runs inside a Web Worker: the same simulation code, training flat out and reporting back
+let lastPost = 0;
+function snapshot(){
+  const T = Trainer;
+  return { gen: T.gen, stage: T.stage, mask: T.mask, best: T.best, bestEaten: T.bestEaten,
+    history: T.history, lastMean: T.lastMean, phase: T.phase, i: T.i, pi: T.pi,
+    trials: T.trials, sumWith: T.sumWith, sumWithout: T.sumWithout,
+    probeWith: T.probeWith, probeWithout: T.probeWithout,
+    memTrials: T.memTrials, sumMemOn: T.sumMemOn, sumNoMem: T.sumNoMem,
+    recordEaten: T.recordEaten, recordCond: T.recordCond, pool: T.pool };
+}
+function post(extra){
+  self.postMessage(Object.assign({ state: snapshot() }, extra || {}));
+  lastPost = performance.now();
+}
+self.onmessage = e => {
+  const m = e.data;
+  if (m.cmd === 'init') Trainer.init(m.seed);
+  else if (m.cmd === 'skip') Trainer.skipToFull();
+  else if (m.cmd === 'apply'){ post({ applied: true, err: applyBrainData(m.data) }); return; }
+  post();
+};
+(function loop(){
+  if (Trainer.world){
+    Trainer.work(30);
+    if (performance.now() - lastPost > 120) post();
+  }
+  setTimeout(loop, 0);
+})();
+</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -1041,8 +1072,28 @@ function readTheme(){
 }
 readTheme();
 
+/* ---------- training runs in a background worker, so the tank never waits on it ---------- */
+// The page keeps a mirror of the trainer: the worker posts its state a few times a
+// second and the tank, the diagram and the panel read from that. Without workers,
+// training falls back to running between frames, as it always used to.
+let worker = null;
+const replies = [];
+try {
+  const src = el('sim').textContent + '\n' + el('trainer-loop').textContent;
+  worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  worker.onmessage = e => {
+    if (e.data.state) Object.assign(Trainer, e.data.state);
+    if (e.data.applied){ const done = replies.shift(); if (done) done(e.data.err); }
+  };
+  worker.onerror = () => { worker = null; };
+} catch (e){ worker = null; }
+function startTraining(seed){
+  Trainer.init(seed);                      // the mirror starts identical to the worker
+  if (worker) worker.postMessage({ cmd: 'init', seed });
+}
+
 /* ---------- the display tank: a window onto the gene pool training is breeding ---------- */
-Trainer.init(20260920);
+startTraining(20260920);
 const show = new World(AW, AH, AD, 160);
 show.usePool = true;
 show.reset(mulberry32(7), Trainer.pool);
@@ -1615,17 +1666,20 @@ function updatePanel(){
 /* ---------- saving and restoring a brain ---------- */
 function say(msg){ el('io-status').textContent = msg; }
 
-function applyBrain(text){
+function applyBrain(text, then){
   let d;
   try { d = JSON.parse(text); }
-  catch (e){ say('That is not readable JSON.'); return false; }
-  const err = applyBrainData(d);
-  if (err){ say(err); return false; }
-  show.reset(mulberry32(Math.floor(Math.random() * 1e9)), Trainer.pool);
-  resetDisplayState();
-  lastGen = -1; drawCurve(); drawTraits(); updatePanel();
-  say('Loaded. Generation ' + Trainer.gen + ', stage ' + Trainer.stage + '. Training continues from here.');
-  return true;
+  catch (e){ say('That is not readable JSON.'); return; }
+  const done = err => {
+    if (err){ say(err); return; }
+    show.reset(mulberry32(Math.floor(Math.random() * 1e9)), Trainer.pool);
+    resetDisplayState();
+    lastGen = -1; drawCurve(); drawTraits(); updatePanel();
+    say('Loaded. Generation ' + Trainer.gen + ', stage ' + Trainer.stage + '. Training continues from here.');
+    if (then) then();
+  };
+  if (worker){ replies.push(done); worker.postMessage({ cmd: 'apply', data: d }); }
+  else done(applyBrainData(d));
 }
 
 let saver = null, saverAsked = false;
@@ -1676,7 +1730,7 @@ function tick(now){
     updateCamera();
     renderer.render(scene, camera);
   }
-  Trainer.work(paused ? 26 : budget);
+  if (!worker) Trainer.work(paused ? 26 : budget);
 
   if (frame % 2 === 0) drawBrain();
   if (frame % 10 === 0){
@@ -1713,13 +1767,13 @@ el('b-sense').addEventListener('click', e => {
   e.currentTarget.textContent = showSense ? 'Hide what it sees' : 'Show what it sees';
 });
 el('b-skip').addEventListener('click', e => {
-  Trainer.skipToFull();
+  if (worker) worker.postMessage({ cmd: 'skip' }); else Trainer.skipToFull();
   e.currentTarget.disabled = true;
   e.currentTarget.textContent = 'Everything given';
   updatePanel();
 });
 el('b-reset').addEventListener('click', () => {
-  Trainer.init(Math.floor(Math.random() * 1e9));
+  startTraining(Math.floor(Math.random() * 1e9));
   show.reset(mulberry32(Math.floor(Math.random() * 1e9)), Trainer.pool);
   resetDisplayState();
   const skip = el('b-skip');
@@ -1752,7 +1806,7 @@ el('b-save').addEventListener('click', async () => {
 });
 el('b-demo').addEventListener('click', () => {
   // the trained champion from demo-brain.json, bundled so it works offline too
-  if (applyBrain(el('demo-brain').textContent)) say('Loaded a ' + Trainer.gen + '-generation hunter. Training continues from here.');
+  applyBrain(el('demo-brain').textContent, () => say('Loaded a ' + Trainer.gen + '-generation hunter. Training continues from here.'));
 });
 el('b-load').addEventListener('click', () => {
   showIO('', 'Paste a saved brain here, then load it.');
@@ -1764,7 +1818,7 @@ el('b-copy').addEventListener('click', async () => {
   catch (e){ t.select(); say('Press the copy key for your system.'); }
 });
 el('b-apply').addEventListener('click', () => {
-  if (applyBrain(el('io-text').value)) el('io-panel').classList.remove('on');
+  applyBrain(el('io-text').value, () => el('io-panel').classList.remove('on'));
 });
 el('b-close').addEventListener('click', () => { el('io-panel').classList.remove('on'); say(''); });
 document.addEventListener('keydown', e => {
