@@ -1173,6 +1173,17 @@ fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 fishMesh.setColorAt(0, new THREE.Color());
 fishMesh.frustumCulled = false;
 scene.add(fishMesh);
+// a slow tail beat: a sideways wave running from head to tail, strongest at the tail
+const fishSwim = new THREE.InstancedBufferAttribute(new Float32Array(show.n), 1);
+fishSwim.setUsage(THREE.DynamicDrawUsage);
+fishGeo.setAttribute('aSwim', fishSwim);
+const swimPhase = Float32Array.from({ length: show.n }, () => Math.random() * 6.283);
+fishMat.onBeforeCompile = sh => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float aSwim;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      transformed.x += sin(aSwim - position.z * 0.55) * 0.55 * smoothstep(2.0, -7.4, position.z);`);
+};
 
 // the shark: a lathed body, dorsal fin, tail and pectorals, nose along +Z
 function sharkGeometry(){
@@ -1195,6 +1206,14 @@ function sharkGeometry(){
   return [body, fins];
 }
 const sharkMat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.12, side: THREE.DoubleSide });
+const sharkSwim = { value: 0 };
+sharkMat.onBeforeCompile = sh => {
+  sh.uniforms.uSwim = sharkSwim;
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nuniform float uSwim;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      transformed.x += sin(uSwim - position.z * 0.09) * 2.2 * smoothstep(4.0, -31.0, position.z);`);
+};
 const shark = new THREE.Group();
 sharkGeometry().forEach(g => shark.add(new THREE.Mesh(g, sharkMat)));
 shark.scale.setScalar(1.8);
@@ -1414,7 +1433,7 @@ function resetDisplayState(){
   }
   show.frame(); sharkFacing.set(show.fx, show.fy, show.fz); bank = 0;
 }
-function drawWater(frame, blend){
+function drawWater(frame, blend, swimDt){
   for (let i = 0; i < show.fish.length; i++){
     const f = show.fish[i], o = i * 3;
     // a fish that was just eaten and reborn elsewhere should not streak across the tank
@@ -1432,7 +1451,11 @@ function drawWater(frame, blend){
     const want = f.flee > 0.12 ? Math.min(1, 0.45 + 0.55 * f.flee) : 0;
     alarm[i] += (want - alarm[i]) * (jump ? 1 : 0.2);
     fishMesh.setColorAt(i, col.copy(T.cFish).lerp(T.cAlarm, alarm[i]));
+    // cruising fish beat about 1.4 times a second; a bolting fish beats faster
+    swimPhase[i] = (swimPhase[i] + swimDt * (1.4 + 2.2 * alarm[i]) * 6.283) % 628.3;
+    fishSwim.array[i] = swimPhase[i];
   }
+  fishSwim.needsUpdate = true;
   fishMesh.instanceMatrix.needsUpdate = true;
   fishMesh.instanceColor.needsUpdate = true;
 
@@ -1443,6 +1466,8 @@ function drawWater(frame, blend){
   // lean into turns a little, the way a body does when it carves rather than slides
   bank += (show.out[0] - bank) * 0.06;
   shark.rotateZ(bank * 0.45);
+  // the shark's beat is slower, and quickens a little in hard turns or with a fish in sight
+  sharkSwim.value = (sharkSwim.value + swimDt * (0.65 + 0.45 * Math.min(1, Math.abs(show.out[0]) + (show.target ? 0.5 : 0))) * 6.283) % 628.3;
 
   scentPts.visible = showScent;
   if (showScent && frame % 2 === 0){
@@ -1880,7 +1905,7 @@ function tick(now){
     if (n === 8) clock = 0;        // fell behind: drop the backlog rather than race to catch up
   }
   if (renderer){
-    drawWater(frame, paused ? 1 : clock / TICK_MS);
+    drawWater(frame, paused ? 1 : clock / TICK_MS, paused ? 0 : dt / 1000 * (fast ? 3 : 1));
     drawProbe();
     updateCamera();
     renderer.render(scene, camera);
