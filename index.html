@@ -1026,6 +1026,7 @@ function applyBrainData(d){
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const el = id => document.getElementById(id);
 const [AW, AH, AD] = ARENA;
@@ -1074,10 +1075,24 @@ floor.position.y = -AH / 2;
 floor.material.transparent = true; floor.material.opacity = 0.45;
 scene.add(tank, floor);
 
-// fish: one instanced cone each, nose along +Z
-const fishGeo = new THREE.ConeGeometry(2.4, 10, 6);
-fishGeo.rotateX(Math.PI / 2);
-const fishMat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0, flatShading: true });
+// fish: a slim body flattened side to side, with a forked tail; nose along +Z
+function fishGeometry(){
+  const prof = [[0,-4.4],[0.8,-3.6],[1.6,-1.4],[1.95,0.6],[1.7,2.6],[1.1,4.4],[0.45,5.6],[0,6.1]]
+    .map(([r, y]) => new THREE.Vector2(r, y));
+  const body = new THREE.LatheGeometry(prof, 10);
+  body.rotateX(Math.PI / 2);
+  body.scale(0.62, 1, 1);
+  body.deleteAttribute('uv');
+  const tail = new THREE.BufferGeometry();
+  tail.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, -3.9,   0, 2.7, -7.4,   0, 0.35, -6.0,
+    0, 0, -3.9,   0, -0.35, -6.0, 0, -2.7, -7.4
+  ], 3));
+  tail.computeVertexNormals();
+  return mergeGeometries([body.toNonIndexed(), tail]);
+}
+const fishGeo = fishGeometry();
+const fishMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.12, side: THREE.DoubleSide });
 const fishMesh = new THREE.InstancedMesh(fishGeo, fishMat, show.n);
 fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 fishMesh.setColorAt(0, new THREE.Color());
@@ -1086,9 +1101,10 @@ scene.add(fishMesh);
 
 // the shark: a lathed body, dorsal fin, tail and pectorals, nose along +Z
 function sharkGeometry(){
-  const prof = [[0,-21],[1.6,-19],[3.2,-14],[5.2,-6],[6.4,2],[6,9],[4.6,15],[2.6,20],[0.9,23],[0,24]]
+  const prof = [[0,-21],[1.2,-19.5],[2.4,-16.5],[3.7,-12],[5,-6],[6,-0.5],[6.4,4],[6.1,9],[5.2,13.5],
+    [3.9,17.5],[2.4,20.6],[1.1,22.8],[0,24]]
     .map(([r, y]) => new THREE.Vector2(r, y));
-  const body = new THREE.LatheGeometry(prof, 14);
+  const body = new THREE.LatheGeometry(prof, 28);
   body.rotateX(Math.PI / 2);
   body.scale(1, 0.78, 1);
   const tri = (...p) => p.flat();
@@ -1103,7 +1119,7 @@ function sharkGeometry(){
   fins.computeVertexNormals();
   return [body, fins];
 }
-const sharkMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.1, flatShading: true, side: THREE.DoubleSide });
+const sharkMat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.12, side: THREE.DoubleSide });
 const shark = new THREE.Group();
 sharkGeometry().forEach(g => shark.add(new THREE.Mesh(g, sharkMat)));
 shark.scale.setScalar(1.8);
@@ -1172,7 +1188,7 @@ scene.add(senseG, aimLine, aimRing);
 
 // a catch: a ring that opens and fades where the fish was taken
 const ripples = [];
-const rippleGeo = new THREE.RingGeometry(0.86, 1, 48);
+const rippleGeo = new THREE.RingGeometry(0.95, 1, 64);
 for (let i = 0; i < 16; i++){
   const m = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false }));
   m.visible = false; scene.add(m); ripples.push(m);
@@ -1262,24 +1278,59 @@ new ResizeObserver(resize).observe(view);
 
 /* ---------- drawing the water ---------- */
 let showScent = false, showSense = false;
-const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
-const zAxis = new THREE.Vector3(0, 0, 1), dir = new THREE.Vector3(), col = new THREE.Color();
-function drawWater(frame){
+const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), one = new THREE.Vector3(1.5, 1.5, 1.5);
+const up = new THREE.Vector3(0, 1, 0), zero = new THREE.Vector3(), dir = new THREE.Vector3(), col = new THREE.Color();
+// the simulation ticks at a fixed rate; drawing blends between the last two ticks, and
+// headings ease toward the direction of travel instead of snapping to every wobble
+const EASE = 0.18;
+const prevPos = new Float32Array(show.n * 3), facing = new Float32Array(show.n * 3), alarm = new Float32Array(show.n);
+const sharkPrev = new THREE.Vector3(), sharkFacing = new THREE.Vector3(1, 0, 0);
+let bank = 0;
+function rememberTick(){
   for (let i = 0; i < show.fish.length; i++){
     const f = show.fish[i];
-    toWorld(f.x, f.y, f.z, pos);
-    dir.set(f.vx, f.vy, f.vz).normalize();
-    q.setFromUnitVectors(zAxis, dir);
-    mtx.compose(pos, q, one.setScalar(1.5));
+    prevPos[i * 3] = f.x; prevPos[i * 3 + 1] = f.y; prevPos[i * 3 + 2] = f.z;
+  }
+  sharkPrev.set(show.sx, show.sy, show.sz);
+}
+function resetDisplayState(){
+  rememberTick();
+  for (let i = 0; i < show.fish.length; i++){
+    const f = show.fish[i], l = Math.hypot(f.vx, f.vy, f.vz) || 1;
+    facing[i * 3] = f.vx / l; facing[i * 3 + 1] = f.vy / l; facing[i * 3 + 2] = f.vz / l;
+    alarm[i] = 0;
+  }
+  show.frame(); sharkFacing.set(show.fx, show.fy, show.fz); bank = 0;
+}
+function drawWater(frame, blend){
+  for (let i = 0; i < show.fish.length; i++){
+    const f = show.fish[i], o = i * 3;
+    // a fish that was just eaten and reborn elsewhere should not streak across the tank
+    const jump = Math.abs(f.x - prevPos[o]) + Math.abs(f.y - prevPos[o + 1]) + Math.abs(f.z - prevPos[o + 2]) > 30;
+    const b = jump ? 1 : blend;
+    toWorld(prevPos[o] + (f.x - prevPos[o]) * b, prevPos[o + 1] + (f.y - prevPos[o + 1]) * b,
+            prevPos[o + 2] + (f.z - prevPos[o + 2]) * b, pos);
+    const l = Math.hypot(f.vx, f.vy, f.vz) || 1, k = jump ? 1 : EASE;
+    dir.set(facing[o] + (f.vx / l - facing[o]) * k, facing[o + 1] + (f.vy / l - facing[o + 1]) * k,
+            facing[o + 2] + (f.vz / l - facing[o + 2]) * k).normalize();
+    facing[o] = dir.x; facing[o + 1] = dir.y; facing[o + 2] = dir.z;
+    q.setFromRotationMatrix(mtx.lookAt(dir, zero, up));        // nose along travel, back kept upright
+    mtx.compose(pos, q, one);
     fishMesh.setMatrixAt(i, mtx);
-    col.copy(T.cFish).lerp(T.cAlarm, f.flee > 0.12 ? Math.min(1, 0.45 + 0.55 * f.flee) : 0);
-    fishMesh.setColorAt(i, col);
+    const want = f.flee > 0.12 ? Math.min(1, 0.45 + 0.55 * f.flee) : 0;
+    alarm[i] += (want - alarm[i]) * (jump ? 1 : 0.2);
+    fishMesh.setColorAt(i, col.copy(T.cFish).lerp(T.cAlarm, alarm[i]));
   }
   fishMesh.instanceMatrix.needsUpdate = true;
   fishMesh.instanceColor.needsUpdate = true;
 
-  toWorld(show.sx, show.sy, show.sz, shark.position);
-  shark.lookAt(tmp.set(shark.position.x + show.fx, shark.position.y + show.fy, shark.position.z + show.fz));
+  toWorld(sharkPrev.x + (show.sx - sharkPrev.x) * blend, sharkPrev.y + (show.sy - sharkPrev.y) * blend,
+          sharkPrev.z + (show.sz - sharkPrev.z) * blend, shark.position);
+  sharkFacing.lerp(tmp.set(show.fx, show.fy, show.fz), 0.15).normalize();
+  shark.lookAt(tmp.copy(shark.position).add(sharkFacing));
+  // lean into turns a little, the way a body does when it carves rather than slides
+  bank += (show.out[0] - bank) * 0.06;
+  shark.rotateZ(bank * 0.45);
 
   scentPts.visible = showScent;
   if (showScent && frame % 2 === 0){
@@ -1571,6 +1622,7 @@ function applyBrain(text){
   const err = applyBrainData(d);
   if (err){ say(err); return false; }
   show.reset(mulberry32(Math.floor(Math.random() * 1e9)), Trainer.pool);
+  resetDisplayState();
   lastGen = -1; drawCurve(); drawTraits(); updatePanel();
   say('Loaded. Generation ' + Trainer.gen + ', stage ' + Trainer.stage + '. Training continues from here.');
   return true;
@@ -1594,25 +1646,33 @@ function showIO(text, msg){
 
 /* ---------- loop ---------- */
 let paused = false, fast = false, lastGen = -1;
-let frame = 0, budget = 9, lastT = 0;
+let frame = 0, budget = 9, lastT = 0, clock = 0;
+const TICK_MS = 1000 / 60;      // the tank runs at 60 ticks a second whatever the screen refresh is
 
 function tick(now){
   requestAnimationFrame(tick);
   frame++;
   if (lastT){
-    const dt = now - lastT;
-    if (dt > 26) budget = Math.max(3, budget - 0.6);
-    else if (dt < 19) budget = Math.min(11, budget + 0.25);
+    const gap = now - lastT;
+    if (gap > 26) budget = Math.max(3, budget - 0.6);
+    else if (gap < 19) budget = Math.min(11, budget + 0.25);
   }
+  const dt = lastT ? Math.min(100, now - lastT) : TICK_MS;
   lastT = now;
 
   show.seedPool = Trainer.pool;   // the tank is a window onto the same gene pool
   if (!paused){
-    const steps = fast ? 3 : 1;
-    for (let k = 0; k < steps; k++) show.step(Trainer.best, Trainer.mask, true, Trainer.stage >= 8);
+    clock += dt * (fast ? 3 : 1);
+    let n = 0;
+    while (clock >= TICK_MS && n < 8){
+      rememberTick();
+      show.step(Trainer.best, Trainer.mask, true, Trainer.stage >= 8);
+      clock -= TICK_MS; n++;
+    }
+    if (n === 8) clock = 0;        // fell behind: drop the backlog rather than race to catch up
   }
   if (renderer){
-    drawWater(frame);
+    drawWater(frame, paused ? 1 : clock / TICK_MS);
     updateCamera();
     renderer.render(scene, camera);
   }
@@ -1661,6 +1721,7 @@ el('b-skip').addEventListener('click', e => {
 el('b-reset').addEventListener('click', () => {
   Trainer.init(Math.floor(Math.random() * 1e9));
   show.reset(mulberry32(Math.floor(Math.random() * 1e9)), Trainer.pool);
+  resetDisplayState();
   const skip = el('b-skip');
   skip.disabled = false; skip.textContent = 'Hand it everything';
   lastGen = -1; drawCurve(); drawTraits(); updatePanel();
@@ -1710,6 +1771,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Space' && e.target === document.body){ e.preventDefault(); el('b-pause').click(); }
 });
 
+resetDisplayState();
 sizeBrain(); drawCurve(); drawTraits(); updatePanel(); resize();
 requestAnimationFrame(tick);
 </script>
